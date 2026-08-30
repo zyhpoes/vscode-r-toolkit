@@ -1,0 +1,19 @@
+{
+  // launch.json = F5 启动方案。插件项目按 F5 会弹出一个"扩展开发宿主"窗口，
+  // 里面加载我们正在开发的插件，方便实时调试。
+  "version": "0.2.0", // 格式版本（固定值）
+  "configurations": [
+    {
+      "name": "Run Extension", // F5 下拉框里显示的名字
+      "type": "extensionHost", // 启动"扩展开发宿主"窗口（插件开发专用模式）
+      "request": "launch", // 新启动一个实例
+      // ${workspaceFolder} = 当前打开的项目根目录；
+      // 整句含义：把当前项目当作要开发的插件，加载进宿主窗口
+      "args": ["--extensionDevelopmentPath=${workspaceFolder}"],
+      // 产物位置：断点从打包后的 JS 映射回 TS 源码（配合 esbuild 的 sourcemap）
+      "outFiles": ["${workspaceFolder}/dist/**/*.js"],
+      // F5 前先自动打包，保证加载的是最新代码（任务在 tasks.json 里定义）
+      "preLaunchTask": "npm: build"
+    }
+  ]
+}

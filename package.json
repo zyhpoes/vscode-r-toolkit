@@ -1,0 +1,47 @@
+{
+  "name": "r-toolkit",
+  "displayName": "R Toolkit",
+  "description": "R language tooling for VS Code: R6 OOP support (go-to-definition, completion, hover, outline), with more R features to come.",
+  "version": "0.1.0",
+  "publisher": "zyhpoes",
+  "license": "PolyForm-Noncommercial-1.0.0",
+  "engines": {
+    "vscode": "^1.135.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "keywords": [
+    "R",
+    "R6",
+    "R6Class",
+    "OOP",
+    "language",
+    "intellisense"
+  ],
+  "activationEvents": [
+    "onLanguage:r"
+  ],
+  "main": "./dist/extension.js",
+  "scripts": {
+    "vscode:prepublish": "npm run build",
+    "build": "node esbuild.mjs",
+    "watch": "node esbuild.mjs --watch",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "package": "vsce package"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^22.10.0",
+    "@types/vscode": "~1.134.0",
+    "@vscode/vsce": "^3.2.0",
+    "esbuild": "^0.28.2",
+    "eslint": "^10.9.1",
+    "typescript": "^5.7.0",
+    "typescript-eslint": "^8.18.0",
+    "vitest": "^3.0.0"
+  }
+}

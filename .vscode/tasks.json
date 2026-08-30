@@ -1,0 +1,15 @@
+{
+  // tasks.json = 任务定义文件。把"一段命令"包装成有名字的任务。
+  // 这里的 "npm: build" 任务被 launch.json 的 preLaunchTask 引用：
+  // F5 时先自动执行 npm run build，再启动扩展宿主窗口。
+  "version": "2.0.0", // 格式版本（固定值）
+  "tasks": [
+    {
+      "type": "npm", // 任务类型：npm 命令
+      "script": "build", // 等价于在终端跑 `npm run build`
+      "group": "build", // 归入"构建"分组（任务面板分类显示）
+      "problemMatcher": [], // 留空：构建报错直接显示在终端，不做自动解析
+      "label": "npm: build" // 任务名字 —— launch.json 引用的就是它
+    }
+  ]
+}

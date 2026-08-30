@@ -1,0 +1,22 @@
+# Dependencies
+node_modules/
+.npm-cache/
+
+# Build output
+out/
+dist/
+*.tsbuildinfo
+
+# VS Code / editor
+.vscode-test/
+.vscode/*.log
+
+# Packaging
+*.vsix
+
+# Test / coverage
+coverage/
+
+# OS
+Thumbs.db
+.DS_Store
