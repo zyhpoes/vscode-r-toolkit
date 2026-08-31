@@ -79,6 +79,11 @@ describe('tokenize 基本切分', () => {
     expect(texts(tokenize('a <- b'))).toEqual(['a', '<-', 'b']);
   });
 
+  it('命名空间运算符 :: 和 :::', () => {
+    expect(texts(tokenize('R6::R6Class'))).toEqual(['R6', '::', 'R6Class']);
+    expect(texts(tokenize('R6:::R6Class'))).toEqual(['R6', ':::', 'R6Class']);
+  });
+
   it('数字：整数、小数、.5', () => {
     expect(texts(tokenize('123'))).toEqual(['123']);
     expect(texts(tokenize('1.5'))).toEqual(['1.5']);

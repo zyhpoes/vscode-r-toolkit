@@ -134,8 +134,8 @@ function isIdentifierPart(ch: string): boolean {
 function operatorLength(text: string, i: number): number {
   const rest = text.slice(i);
 
-  // 三字符运算符
-  if (rest.startsWith('<<-') || rest.startsWith('->>')) {
+  // 三字符运算符（含命名空间 :: 的第三冒号）
+  if (rest.startsWith('<<-') || rest.startsWith('->>') || rest.startsWith(':::')) {
     return 3;
   }
 
@@ -148,7 +148,8 @@ function operatorLength(text: string, i: number): number {
     rest.startsWith('==') ||
     rest.startsWith('!=') ||
     rest.startsWith('&&') ||
-    rest.startsWith('||')
+    rest.startsWith('||') ||
+    rest.startsWith('::') // 命名空间访问（R6::R6Class）
   ) {
     return 2;
   }

@@ -5,8 +5,9 @@
  */
 
 // vscode 模块是 VS Code 运行时注入的（打包时 external，不编译进产物）。
-// 现在要用运行时的 API（状态栏），所以用普通导入。
+// 现在要用运行时的 API（状态栏、注册 provider），所以用普通导入。
 import * as vscode from 'vscode';
+import { R6DefinitionProvider } from './providers/definition';
 
 /**
  * 插件激活时调用。
@@ -20,6 +21,12 @@ export function activate(context: vscode.ExtensionContext): void {
   statusBar.show();
   // 登记进订阅：插件被卸载时 VS Code 会自动销毁它，不用手动清理
   context.subscriptions.push(statusBar);
+
+  // 给 R 语言注册"定义跳转"能力（Ctrl+点击 / F12 触发）。
+  // 只作用于 R 文件，不碰其他语言 —— 与 vscode-R 共存的关键。
+  context.subscriptions.push(
+    vscode.languages.registerDefinitionProvider('r', new R6DefinitionProvider()),
+  );
 
   // 备用确认：调试控制台里也能看到这行（用 warn 因为 lint 只允许 warn/error）
   console.warn('[r-toolkit] 插件已激活');
