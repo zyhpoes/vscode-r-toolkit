@@ -13,13 +13,27 @@ import { defineConfig } from 'eslint/config';
 // defineConfig() 接受配置数组，是官方推荐的组装方式
 export default defineConfig([
   // 不检查的目录 / 文件
-  { ignores: ['dist/**', 'out/**', 'node_modules/**', 'coverage/**', '*.mjs'] },
+  { ignores: ['dist/**', 'out/**', 'node_modules/**', 'coverage/**'] },
 
   // JS 通用规则
   js.configs.recommended,
 
-  // TS 推荐规则（会调用编译器拿类型信息，查"可能为 null 却当非 null 用"这类错误）
-  ...tseslint.configs.recommendedTypeChecked,
+  // Node 脚本（.mjs/.js 构建与工具脚本）运行在 Node 环境，提供 Node 全局变量
+  {
+    files: ['**/*.mjs', '**/*.js'],
+    languageOptions: {
+      globals: {
+        process: 'readonly',
+        console: 'readonly',
+      },
+    },
+  },
+
+  // TS 推荐规则：类型感知规则需要 TS 类型信息，只作用于 TS 文件（不适用于 .js/.mjs）
+  ...tseslint.configs.recommendedTypeChecked.map((conf) => ({
+    ...conf,
+    files: ['**/*.ts'],
+  })),
 
   // 项目自定义规则（只作用于我们自己的代码）
   {
