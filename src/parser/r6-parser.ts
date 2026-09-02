@@ -45,10 +45,19 @@ export interface R6ClassDef {
    */
   members: R6Member[];
 
+  /** 合成成员（R6 自动生成、非用户定义）。v1 只含 new：有 initialize 指向它，否则指向类名 */
+  synthetic: SyntheticMember[];
+
   /** 例子：Person <- R6Class("Person", ...) 里，stIndex = "R6Class" 的坐标 */
   stIndex: number;
   /** 同一个例子里，enIndex = 最外层配对 ')' 的坐标 */
   enIndex: number;
+}
+
+/** R6 合成成员：跳转目标（nameOffset 指向 initialize 或类名） */
+export interface SyntheticMember {
+  name: string; // 合成成员名（如 'new'）
+  nameOffset: number; // 跳转目标：initialize 的偏移（有）或类名偏移（无）
 }
 
 /** 从 R 代码文本中识别所有 R6 类定义 */
@@ -82,11 +91,14 @@ export function parseR6(text: string): R6ClassDef[] {
     if (cls !== null) {
       // 从调用范围提取成员（public/private/active 三个区）
       const members = extractMembers(tokens, callName.enIndex + 1, close);
+      // 生成合成成员（v1 只含 new）：有 initialize 指向它，没有指向类名
+      const synthetic = buildSynthetic(members, cls.nameOffset);
       // 返回结果
       result.push({
         name: cls.name,               // 类名
         nameOffset: cls.nameOffset,   // 类名的偏移量
         members,                      // 成员清单（public/private/active 提取结果）
+        synthetic,                    // 合成成员（new）
         stIndex: callName.stIndex,    // 调用名第一个 token 的下标（调用范围起点）
         enIndex: close,               // 配对 ')' 的下标（调用范围终点）
       });
@@ -103,8 +115,9 @@ export function parseR6(text: string): R6ClassDef[] {
  * 判断 tokens[index] 是否为一个 R6Class 调用的名字开头。
  * 返回 { stIndex, enIndex }：调用名在 token 数组中的起止下标（范围）；
  * 不是调用则返回 null。
+ * （export 供 analysis/bindings.ts 复用：判断赋值右侧是不是 R6Class）
  */
-function r6CallTokenRange(
+export function r6CallTokenRange(
   tokens: Token[],
   index: number,
 ): { stIndex: number; enIndex: number } | null {
@@ -297,4 +310,26 @@ function memberName(tokens: Token[], stIndex: number, scope: R6Scope): R6Member 
 /** 判断标识符文本是否是 R6 的区名；是则返回区名，否则返回 null */
 function scopeOf(text: string): R6Scope | null {
   return text === 'public' || text === 'private' || text === 'active' ? text : null;
+}
+
+/**
+ * 生成合成成员（v1 只含 new）。
+ * R6 语义：`$new()` 是自动构造函数；类里定义了 initialize 则 new 调用它，
+ * 没定义则 new 用默认空构造 —— 所以 new 的跳转目标：有 initialize 指向 initialize，
+ * 没有则指向类名（跳到类定义处）。
+ */
+function buildSynthetic(members: R6Member[], classNameOffset: number): SyntheticMember[] {
+  // 查找这个R6类是否定义了initialize函数
+  const initialize = members.find(
+    (m) => m.name === 'initialize' && m.scope === 'public',
+  );
+
+  // 如果R6定义了initialize函数，那点击Person$new()时会跳转到initialize
+  // 如果R6没定义initialize函数，那点击Person$new()时会跳转到Person
+  return [
+    {
+      name: 'new',
+      nameOffset: initialize !== undefined ? initialize.nameOffset : classNameOffset,
+    },
+  ];
 }
