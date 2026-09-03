@@ -236,8 +236,9 @@ function extractMembers(tokens: Token[], openIndex: number, close: number): R6Me
  *     → 切成 4 块：["Persion", "public = list(A = a)", "private = list(C = c)", "lock_objects = FALSE"]
  *     注意：切的是"参数块"，每块内部的逗号（list 里的、{} 里的）不会误切。
  *     是否区名、要不要剔除，由调用方（extractMembers）判断 —— 本函数只负责切块。
+ *     （export 供 analysis/box.ts 复用：切 box::use 括号内的模块）
  */
-function splitTopLevel(
+export function splitTopLevel(
   tokens: Token[],  // 整个文件 tokenize 的结果
   from: number,     // 调用方指定的开括号 '(' 的下一个 token 下标（如 R6Class 或 list 的 '('）
   to: number        // 配对 ')' 的下标（区间不含它，只作边界）

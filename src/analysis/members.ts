@@ -1,30 +1,42 @@
 /**
- * 成员定义解析：给定 R 代码文本和光标偏移量，判断光标下的成员引用
- * （self$xxx / private$xxx / 类名$xxx）指向哪个成员定义。
+ * 成员定义解析：给定多个文件 + 光标位置，判断光标下的成员引用
+ * （self$xxx / private$xxx / 类名$xxx / 实例$xxx）指向哪个成员定义。
  * 纯逻辑：不依赖 vscode，可在纯 Node 中测试。
  */
 
 import { tokenize } from '../parser/tokenizer';
 import { parseR6, type R6ClassDef, type R6Member, type R6Scope } from '../parser/r6-parser';
 import { TextLines } from '../utils/text';
+import type { SourceFile } from './source-file';
+import { findClassAcrossFiles } from './definitions';
 import { parseBindings } from './bindings';
 import { resolveVarType } from './type-resolve';
 
-/** 命中结果：成员名 + 定义位置（行列，0 起） */
+/** 命中结果：成员名 + 目标所在文件 + 定义位置（行列，0 起） */
 export interface MemberDefinition {
   name: string;
+  uri: string; // 目标所在文件（恒有值）
   line: number;
   character: number;
 }
 
 /**
  * 解析光标处的成员定义。
- * @param text         R 代码全文
- * @param cursorOffset 光标偏移量
- * @returns 命中返回成员定义位置；未命中返回 null
+ * @param files         所有相关文件（当前文件 + 依赖文件）
+ * @param cursorFileUri 光标在哪个文件
+ * @param cursorOffset  光标偏移量
+ * @returns 命中返回成员定义位置（带目标文件 uri）；未命中返回 null
  */
-export function resolveMemberDefinition(text: string, cursorOffset: number): MemberDefinition | null {
-  const tokens = tokenize(text);
+export function resolveMemberDefinition(
+  files: SourceFile[],
+  cursorFileUri: string,
+  cursorOffset: number,
+): MemberDefinition | null {
+  const cursorFile = files.find((f) => f.uri === cursorFileUri);
+  if (cursorFile === undefined) {
+    return null;
+  }
+  const tokens = tokenize(cursorFile.text);
 
   // 找光标下的 identifier（findIndex 返回下标）
   const wordIdx = tokens.findIndex(
@@ -50,27 +62,38 @@ export function resolveMemberDefinition(text: string, cursorOffset: number): Mem
     return null;
   }
 
-  const classes = parseR6(text);
-
-  // 找目标类：分三种情况（self$ / private$ / 类名$ / 实例变量$）
+  // ── 确定目标类 + 它所在文件 ────────────────────────────────────
   let targetClass: R6ClassDef | undefined;
+  let targetFile: SourceFile;
   let scopes: R6Scope[];
 
   if (before.text === 'self' || before.text === 'private') {
-    // 位置反查：self/private 所在的 token 落在哪个类的调用范围内
+    // self/private 出现在方法体里，方法体在类定义所在文件内 → 反查光标文件里的类
+    const classes = parseR6(cursorFile.text);
     targetClass = classes.find((c) => c.stIndex <= wordIdx && wordIdx <= c.enIndex);
+    targetFile = cursorFile;
     scopes = before.text === 'self' ? ['public', 'active'] : ['private'];
-  } else if (classes.some((c) => c.name === before.text)) {
-    // 类名$：按类名查
-    targetClass = classes.find((c) => c.name === before.text);
-    scopes = ['public', 'active'];
   } else {
-    // 实例变量$（p$xxx）：查 p 的类型（第 2 层解析），再按类名找类
-    const type = resolveVarType(parseBindings(text), before.text, cursorOffset);
-    if (type === null || type.kind !== 'class') {
+    // 类名$ 或 实例变量$（p$xxx）：
+    // 先看 before 是不是已知类名（当前文件或依赖文件），不是则查 p 的类型
+    let className: string | undefined;
+    if (findClassAcrossFiles(files, before.text) !== undefined) {
+      className = before.text; // 已知类名
+    } else {
+      const type = resolveVarType(parseBindings(cursorFile.text), before.text, cursorOffset);
+      if (type !== null && type.kind === 'class') {
+        className = type.className;
+      }
+    }
+    if (className === undefined) {
       return null;
     }
-    targetClass = classes.find((c) => c.name === type.className);
+    const found = findClassAcrossFiles(files, className);
+    if (found === undefined) {
+      return null;
+    }
+    targetClass = found.classDef;
+    targetFile = found.file;
     scopes = ['public', 'active'];
   }
 
@@ -86,20 +109,22 @@ export function resolveMemberDefinition(text: string, cursorOffset: number): Mem
 
   // 用户成员找到了 → 直接用它，跳转目标就是它的定义位置
   if (member !== undefined) {
-    const pos = new TextLines(text).positionAt(member.nameOffset);
-    return { name: word.text, line: pos.line, character: pos.character };
+    return buildResult(word.text, targetFile, member.nameOffset);
   }
 
   // ── 用户成员没找到 → 查合成成员（如 new）─────────────────────
   // 合成成员是 R6 自动生成的（new 指向 initialize 或类定义），不限区，按名字找
   const synthetic = targetClass.synthetic.find((s) => s.name === word.text);
-
-  // 合成成员找到了 → 跳它的目标（如 new → initialize 定义处）
   if (synthetic !== undefined) {
-    const pos = new TextLines(text).positionAt(synthetic.nameOffset);
-    return { name: word.text, line: pos.line, character: pos.character };
+    return buildResult(word.text, targetFile, synthetic.nameOffset);
   }
 
   // 用户成员和合成成员都没有 → 无意义跳转
   return null;
+}
+
+/** 把成员偏移量换算成行列，组装成带目标文件 uri 的结果 */
+function buildResult(name: string, file: SourceFile, nameOffset: number): MemberDefinition {
+  const pos = new TextLines(file.text).positionAt(nameOffset);
+  return { name, uri: file.uri, line: pos.line, character: pos.character };
 }
