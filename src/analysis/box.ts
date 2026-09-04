@@ -35,19 +35,19 @@ export function parseBoxImports(text: string): BoxImport[] {
 
     // use 的 '(' 下标 = i + 3（box :: use (）
     const openIndex = i + 3;
-    const open = tokens[openIndex];
-    if (open === undefined || open.kind !== 'operator' || open.text !== '(') {
+    const openToken = tokens[openIndex];
+    if (openToken === undefined || openToken.kind !== 'operator' || openToken.text !== '(') {
       continue;
     }
 
     // 找配对的 ')'（数圆括号深度）
-    const close = findCloseParen(tokens, openIndex);
-    if (close === -1) {
+    const closeIndex = findCloseParen(tokens, openIndex);
+    if (closeIndex === -1) {
       continue; // 括号没配对（代码不完整），跳过
     }
 
     // 括号内按顶层逗号切成模块段，逐段解析
-    const segments = splitTopLevel(tokens, openIndex + 1, close);
+    const segments = splitTopLevel(tokens, openIndex, closeIndex);
     for (const [segStart] of segments) {
       const imp = parseSegment(tokens, segStart, tokens[i].offset);
       if (imp !== null) {

@@ -20,3 +20,6 @@ coverage/
 # OS
 Thumbs.db
 .DS_Store
+
+# 开发过程中记录的文档不用上传
+notes/

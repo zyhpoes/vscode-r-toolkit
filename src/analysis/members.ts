@@ -9,7 +9,6 @@ import { parseR6, type R6ClassDef, type R6Member, type R6Scope } from '../parser
 import { TextLines } from '../utils/text';
 import type { SourceFile } from './source-file';
 import { findClassAcrossFiles } from './definitions';
-import { parseBindings } from './bindings';
 import { resolveVarType } from './type-resolve';
 
 /** 命中结果：成员名 + 目标所在文件 + 定义位置（行列，0 起） */
@@ -80,7 +79,7 @@ export function resolveMemberDefinition(
     if (findClassAcrossFiles(files, before.text) !== undefined) {
       className = before.text; // 已知类名
     } else {
-      const type = resolveVarType(parseBindings(cursorFile.text), before.text, cursorOffset);
+      const type = resolveVarType(files, before.text, cursorFileUri, cursorOffset);
       if (type !== null && type.kind === 'class') {
         className = type.className;
       }

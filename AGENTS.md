@@ -29,4 +29,14 @@
 ## 3. 命名约定
 
 - 表示"开始 / 起点"的变量用 `st` 前缀（如 `stIndex`、`stdate`），表示"结束 / 终点"的用 `en` 前缀（如 `enIndex`、`endate`）
-- 括号命名：括号的**下标**用 `openIndex` / `closeIndex`（或 `stIndex` / `enIndex` 表达范围）；括号的**字符**用 `openChar` / `closeChar` —— 下标与字符必须用不同词，禁止混用 `open`/`close` 同时指代两者
+
+**括号命名（按"指代什么"区分；括号含 `()` 圆括号、`{}` 花括号、`[]` 方括号）：**
+
+| 指代 | 命名 | 例子/用途 |
+|---|---|---|
+| 下标（位置） | `openIndex` / `closeIndex` | 括号在 token 数组的位置；R6Class 调用层默认就是它 |
+| 下标 + 语义层前缀 | `scopeOpenIndex` / `scopeCloseIndex` | scope（public/private/active）成员列表层等更深层括号，按用途加前缀 |
+| 字符 | `openChar` / `closeChar` | `'('` / `')'`、`'{'` / `'}'`、`'['` / `']'` 本身 |
+| token 对象 | `openToken` / `closeToken` | 取出 token 检查"是不是 '('" |
+
+> 禁止：混用 `open`/`close` 同时指代下标、字符、token 中的多种；将来出现新层级按用途加前缀命名（如表 → `tableOpenIndex`），不用时则不加前缀。

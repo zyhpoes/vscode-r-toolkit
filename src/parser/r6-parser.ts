@@ -73,14 +73,15 @@ export function parseR6(text: string): R6ClassDef[] {
     }
 
     // 名字后必须紧跟 '('，否则只是同名变量，不是调用
-    const open = tokens[callName.enIndex + 1];
-    if (open === undefined || open.kind !== 'operator' || open.text !== '(') {
+    const openToken = tokens[callName.enIndex + 1];
+    if (openToken === undefined || openToken.kind !== 'operator' || openToken.text !== '(') {
       continue;
     }
 
-    // 用深度计数器找配对的 ')'，拿到调用范围
-    const close = matchBracket(tokens, callName.enIndex + 1, '(');
-    if (close === -1) {
+    // 确定圆括号的坐标，方便后续调用
+    const openIndex = callName.enIndex + 1;
+    const closeIndex = matchBracket(tokens, openIndex, '(');
+    if (closeIndex === -1) {
       continue; // 括号没配对（代码不完整），跳过
     }
 
@@ -90,7 +91,7 @@ export function parseR6(text: string): R6ClassDef[] {
     const cls = findClassNameAndOffset(tokens, callName.stIndex);
     if (cls !== null) {
       // 从调用范围提取成员（public/private/active 三个区）
-      const members = extractMembers(tokens, callName.enIndex + 1, close);
+      const members = extractMembers(tokens, openIndex, closeIndex);
       // 生成合成成员（v1 只含 new）：有 initialize 指向它，没有指向类名
       const synthetic = buildSynthetic(members, cls.nameOffset);
       // 返回结果
@@ -100,12 +101,12 @@ export function parseR6(text: string): R6ClassDef[] {
         members,                      // 成员清单（public/private/active 提取结果）
         synthetic,                    // 合成成员（new）
         stIndex: callName.stIndex,    // 调用名第一个 token 的下标（调用范围起点）
-        enIndex: close,               // 配对 ')' 的下标（调用范围终点）
+        enIndex: closeIndex,          // 配对 ')' 的下标（调用范围终点）
       });
     }
 
     // 跳过整个调用（含内部嵌套的 R6Class），避免重复扫描
-    i = close;
+    i = closeIndex;
   }
 
   return result;
@@ -170,11 +171,11 @@ function findClassNameAndOffset(
 
 /**
  * 从 R6Class 调用范围中提取成员（public/private/active 三个区）。
- * @param openIndex 外层 '(' 的下标
- * @param close     配对 ')' 的下标
+ * @param openIndex  外层 '(' 的下标
+ * @param closeIndex 配对 ')' 的下标
  * @returns 成员清单；没有任何区则返回空数组
  */
-function extractMembers(tokens: Token[], openIndex: number, close: number): R6Member[] {
+function extractMembers(tokens: Token[], openIndex: number, closeIndex: number): R6Member[] {
   const members: R6Member[] = [];
 
   /**
@@ -191,7 +192,7 @@ function extractMembers(tokens: Token[], openIndex: number, close: number): R6Me
    * （end 不含：该块到 end 前一个 token 为止）
    * 无关参数（如 lock_objects）也会被切成块，是否区名由下面的循环逐个判断。
    */
-  const argRanges = splitTopLevel(tokens, openIndex + 1, close);
+  const argRanges = splitTopLevel(tokens, openIndex, closeIndex);
 
   // 每个参数块：看开头是不是 `区名 = list( ... )`
   // （只关心块起点 start；end 用不上，不解构避免未使用警告）
@@ -214,15 +215,15 @@ function extractMembers(tokens: Token[], openIndex: number, close: number): R6Me
       continue;
     }
 
-    // 找 list 的配对 ')'；配对失败说明代码不完整，跳过
-    const listClose = matchBracket(tokens, start + 3, '(');
-    if (listClose !== -1) {
+    // 找 scope（public/private/active）的 list 配对 ')'；配对失败说明代码不完整，跳过
+    const scopeCloseIndex = matchBracket(tokens, start + 3, '(');
+    if (scopeCloseIndex !== -1) {
       // tokens: 整个文件的 token
-      // start + 3: list 的开括号 '('
-      // listClose: 配对 ')' 的下标
+      // start + 3: scope 的 list 开括号 '('
+      // scopeCloseIndex: 配对 ')' 的下标
       // scope: 成员所属类别（public/private/active）
       // 作用：解析 list 内容，得到该区成员，展开后收进 members
-      members.push(...parseMemberList(tokens, start + 3, listClose, scope));
+      members.push(...parseMemberList(tokens, start + 3, scopeCloseIndex, scope));
     }
   }
 
@@ -230,7 +231,8 @@ function extractMembers(tokens: Token[], openIndex: number, close: number): R6Me
 }
 
 /**
- * 按"顶层逗号"把 [from, to) 区间切成子区间数组 [[start, end), ...]。
+ * 按"顶层逗号"把括号内部（开括号之后、闭括号之前）切成子区间数组。
+ * 区间为 [openIndex+1, closeIndex)：跳过开括号本身、不含闭括号。
  *
  * 例：R6Class("Persion", public = list(A = a), private = list(C = c), lock_objects = FALSE)
  *     → 切成 4 块：["Persion", "public = list(A = a)", "private = list(C = c)", "lock_objects = FALSE"]
@@ -239,51 +241,53 @@ function extractMembers(tokens: Token[], openIndex: number, close: number): R6Me
  *     （export 供 analysis/box.ts 复用：切 box::use 括号内的模块）
  */
 export function splitTopLevel(
-  tokens: Token[],  // 整个文件 tokenize 的结果
-  from: number,     // 调用方指定的开括号 '(' 的下一个 token 下标（如 R6Class 或 list 的 '('）
-  to: number        // 配对 ')' 的下标（区间不含它，只作边界）
+  tokens: Token[], // 整个文件 tokenize 的结果
+  openIndex: number, // 开括号 '(' 的下标（函数内部从它的下一个开始切）
+  closeIndex: number // 配对 ')' 的下标（区间不含它，只作边界）
 ): Array<[number, number]> {
   const ranges: Array<[number, number]> = [];
-  let itemStart = from;
+  // 第一个块的起点 = 开括号的下一个 token（跳过 '(' 本身）
+  let stItem = openIndex + 1;
   let depth = 0;
-  for (let j = from; j < to; j++) {
+  // 从开括号的下一个开始，扫到闭括号前结束
+  for (let j = openIndex + 1; j < closeIndex; j++) {
     const t = tokens[j];
     // 只有运算符参与切分判断（括号进/出深度、逗号分隔），其他 token 跳过
     if (t.kind === 'operator') {
       if (t.text === '(' || t.text === '{' || t.text === '[') {
-        depth++;              // 进嵌套：里面的逗号不算顶层
+        depth++; // 进嵌套：里面的逗号不算顶层
       } else if (t.text === ')' || t.text === '}' || t.text === ']') {
-        depth--;              // 出嵌套
+        depth--; // 出嵌套
       } else if (t.text === ',' && depth === 0) {
-        // 顶层逗号：当前块结束（[itemStart, j)），新块从逗号后开始
-        ranges.push([itemStart, j]);
-        itemStart = j + 1;
+        // 顶层逗号：当前块结束（[stItem, j)），新块从逗号后开始
+        ranges.push([stItem, j]);
+        stItem = j + 1;
       }
     }
   }
-  // 最后一块没有"结尾逗号"触发收尾，所以循环结束后必须手动补上 [itemStart, to)。
+  // 最后一块没有"结尾逗号"触发收尾，所以循环结束后必须手动补上 [stItem, closeIndex)。
   // 反面例子：若不补，R6Class("Persion", public = list(...), private = list(...))
   // 只会切出 ["Persion", "public = list(...)"]，private 块会丢失。
-  ranges.push([itemStart, to]);
+  ranges.push([stItem, closeIndex]);
   return ranges;
 }
 
 /**
- * 解析 `list( ... )` 的内容：按顶层逗号切成员项，每项取名字。
- * @param listOpen  list 的 '(' 下标
- * @param listClose list 的配对 ')' 下标
+ * 解析 scope（public/private/active）的 list 内容：按顶层逗号切成员项，每项取名字。
+ * @param scopeOpenIndex  scope 的 list 开括号 '(' 下标
+ * @param scopeCloseIndex scope 的 list 配对 ')' 下标
  */
 function parseMemberList(
   tokens: Token[],
-  listOpen: number,
-  listClose: number,
+  scopeOpenIndex: number,
+  scopeCloseIndex: number,
   scope: R6Scope,
 ): R6Member[] {
   const members: R6Member[] = [];
 
   // 复用 splitTopLevel：按顶层逗号把 list 内容切成成员项
   // （方法体/索引里的逗号被括号挡在"非顶层"，不会被误切）
-  const itemRanges = splitTopLevel(tokens, listOpen + 1, listClose);
+  const itemRanges = splitTopLevel(tokens, scopeOpenIndex, scopeCloseIndex);
   for (const [start] of itemRanges) {
     const m = memberName(tokens, start, scope);
     if (m !== null) {

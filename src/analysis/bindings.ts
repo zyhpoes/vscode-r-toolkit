@@ -8,6 +8,7 @@
 import { tokenize, type Token } from '../parser/tokenizer';
 import { TextLines } from '../utils/text';
 import { r6CallTokenRange } from '../parser/r6-parser';
+import { nextNonComment } from '../parser/token-utils';
 
 /**
  * 赋值右侧的形态（这个赋值把变量变成了什么）。
@@ -22,9 +23,10 @@ export type BindingRhs =
 
 /** 一条赋值记录 */
 export interface Binding {
-  varName: string;  // 被赋值的变量名（赋值左侧）
-  rhs: BindingRhs;  // 右侧形态（这个变量变成了什么）
-  offset: number;   // varName 的位置（用于"最近赋值"判断）
+  varName: string; // 被赋值的变量名（赋值左侧）
+  rhs: BindingRhs; // 右侧形态（这个变量变成了什么）
+  rhsStIndex: number; // 右侧第一个 token 的下标（供求值器 evaluateRhs 定位右边用）
+  offset: number; // varName 的位置（用于"最近赋值"判断）
 }
 
 /** 扫描全文所有赋值（一次性、不递归），按代码顺序返回 */
@@ -52,7 +54,7 @@ export function parseBindings(text: string): Binding[] {
 
     // 分类右边形态
     const rhs = classifyRhs(tokens, i + 1, lines);
-    bindings.push({ varName: lhs.text, rhs, offset: lhs.offset });
+    bindings.push({ varName: lhs.text, rhs, rhsStIndex: i + 1, offset: lhs.offset });
   }
 
   return bindings;
@@ -95,7 +97,7 @@ function classifyRhs(tokens: Token[], stIndex: number, lines: TextLines): Bindin
 
   // 别名：p <- q（右边只有一个标识符，语句到这就结束）
   if (first.kind === 'identifier') {
-    const nxt = nextMeaningful(tokens, stIndex + 1); // 跳过注释
+    const nxt = nextNonComment(tokens, stIndex + 1); // 跳过注释
     const endsHere =
       nxt === undefined ||
       nxt.text === ';' || // 分号分隔的下一句
@@ -107,14 +109,4 @@ function classifyRhs(tokens: Token[], stIndex: number, lines: TextLines): Bindin
 
   // 其他（表达式、字面量、函数调用等）—— 无追踪价值
   return { kind: 'unknown' };
-}
-
-/** 从 from 开始找下一个"有意义"的 token（跳过注释） */
-function nextMeaningful(tokens: Token[], from: number): Token | undefined {
-  for (let j = from; j < tokens.length; j++) {
-    if (tokens[j].kind !== 'comment') {
-      return tokens[j];
-    }
-  }
-  return undefined;
 }
