@@ -8,8 +8,9 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
-import { resolveClassDefinition } from '../analysis/definitions';
+import { resolveClassDefinition, resolveVariableDefinition } from '../analysis/definitions';
 import { resolveMemberDefinition } from '../analysis/members';
+import { createContext } from '../analysis/context';
 import { parseBoxImports, type BoxImport } from '../analysis/box';
 import { TextLines } from '../utils/text';
 import type { SourceFile } from '../analysis/source-file';
@@ -37,18 +38,28 @@ export class R6DefinitionProvider implements vscode.DefinitionProvider {
     // 光标位置（行列）→ 偏移量（纯逻辑只认偏移量）
     const cursorOffset = new TextLines(text).offsetAt(position.line, position.character);
 
+    // 组装分析上下文：tokens/绑定/类名表/行索引 只解析一次，查询函数共享
+    const ctx = createContext(files, uri);
+
     // 先试成员跳转（self$xxx / private$xxx / 类名$xxx 的成员部分）
-    const memberDef = resolveMemberDefinition(files, uri, cursorOffset);
+    const memberDef = resolveMemberDefinition(ctx, cursorOffset);
     if (memberDef !== null) {
       const target = new vscode.Position(memberDef.line, memberDef.character);
       return new vscode.Location(vscode.Uri.parse(memberDef.uri), target);
     }
 
     // 再试类名跳转（类名本身）
-    const classDef = resolveClassDefinition(files, uri, cursorOffset);
+    const classDef = resolveClassDefinition(ctx, cursorOffset);
     if (classDef !== null) {
       const target = new vscode.Position(classDef.line, classDef.character);
       return new vscode.Location(vscode.Uri.parse(classDef.uri), target);
+    }
+
+    // 最后试变量跳转（普通变量 → 它的赋值行；类名已在上一步命中，到不了这里）
+    const varDef = resolveVariableDefinition(ctx, cursorOffset);
+    if (varDef !== null) {
+      const target = new vscode.Position(varDef.line, varDef.character);
+      return new vscode.Location(vscode.Uri.parse(varDef.uri), target);
     }
 
     // 都不是 → null（编辑器显示"未找到定义"）

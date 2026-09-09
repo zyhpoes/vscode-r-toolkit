@@ -1,19 +1,20 @@
 import { describe, expect, it } from 'vitest';
 import { resolveMemberDefinition } from '../../src/analysis/members';
+import { createContext, type AnalysisContext } from '../../src/analysis/context';
 import type { SourceFile } from '../../src/analysis/source-file';
 
-// 辅助：把单文件文本包装成 files 数组（当前文件 uri 固定为 test.R）
-function singleFile(text: string): { files: SourceFile[]; uri: string } {
-  return { files: [{ uri: 'test.R', text }], uri: 'test.R' };
+// 辅助：把单文件文本包装成 ctx（当前文件 uri 固定为 test.R）
+function singleCtx(text: string): AnalysisContext {
+  return createContext([{ uri: 'test.R', text }], 'test.R');
 }
 
 describe('resolveMemberDefinition 单文件光标定位成员定义', () => {
   it('self$greet → 跳到 public 区 greet 定义处', () => {
     // greet 方法体内引用 self$greet（自引用）
     const text = 'Person <- R6Class("Person", public = list(greet = function() self$greet))';
-    const { files, uri } = singleFile(text);
+    const ctx = singleCtx(text);
     const cursor = text.indexOf('self$greet') + 'self$'.length + 2;
-    expect(resolveMemberDefinition(files, uri, cursor)).toEqual({
+    expect(resolveMemberDefinition(ctx, cursor)).toEqual({
       name: 'greet',
       uri: 'test.R',
       line: 0,
@@ -27,9 +28,9 @@ describe('resolveMemberDefinition 单文件光标定位成员定义', () => {
       '  private = list(age = NA),\n' + // 第 1 行：age 在 "  private = list(" 之后，character 17
       '  public = list(get_age = function() private$age)\n' +
       ')';
-    const { files, uri } = singleFile(text);
+    const ctx = singleCtx(text);
     const cursor = text.indexOf('private$age') + 'private$'.length + 1;
-    expect(resolveMemberDefinition(files, uri, cursor)).toEqual({
+    expect(resolveMemberDefinition(ctx, cursor)).toEqual({
       name: 'age',
       uri: 'test.R',
       line: 1,
@@ -46,9 +47,9 @@ describe('resolveMemberDefinition 单文件光标定位成员定义', () => {
       '  )\n' +
       ')\n' +
       'Person$greet';
-    const { files, uri } = singleFile(text);
+    const ctx = singleCtx(text);
     const cursor = text.indexOf('Person$greet') + 'Person$'.length + 2;
-    expect(resolveMemberDefinition(files, uri, cursor)).toEqual({
+    expect(resolveMemberDefinition(ctx, cursor)).toEqual({
       name: 'greet',
       uri: 'test.R',
       line: 2,
@@ -60,9 +61,9 @@ describe('resolveMemberDefinition 单文件光标定位成员定义', () => {
     const text =
       'A <- R6Class("A", public = list(name = NULL, f = function() self$name))\n' + // 第 0 行
       'B <- R6Class("B", public = list(name = NULL, f = function() self$name))'; // 第 1 行
-    const { files, uri } = singleFile(text);
+    const ctx = singleCtx(text);
     const cursor1 = text.indexOf('self$name') + 'self$'.length + 2;
-    expect(resolveMemberDefinition(files, uri, cursor1)).toEqual({
+    expect(resolveMemberDefinition(ctx, cursor1)).toEqual({
       name: 'name',
       uri: 'test.R',
       line: 0,
@@ -70,7 +71,7 @@ describe('resolveMemberDefinition 单文件光标定位成员定义', () => {
     });
 
     const cursor2 = text.indexOf('self$name', cursor1 + 1) + 'self$'.length + 2;
-    expect(resolveMemberDefinition(files, uri, cursor2)).toEqual({
+    expect(resolveMemberDefinition(ctx, cursor2)).toEqual({
       name: 'name',
       uri: 'test.R',
       line: 1,
@@ -85,9 +86,9 @@ describe('resolveMemberDefinition 单文件光标定位成员定义', () => {
       '  private = list(age = NA),\n' + // 第 2 行：private 的 age（self 不应跳到这）
       '  public = list(f = function() self$age)\n' +
       ')';
-    const { files, uri } = singleFile(text);
+    const ctx = singleCtx(text);
     const cursor = text.indexOf('self$age') + 'self$'.length + 2;
-    expect(resolveMemberDefinition(files, uri, cursor)).toEqual({
+    expect(resolveMemberDefinition(ctx, cursor)).toEqual({
       name: 'age',
       uri: 'test.R',
       line: 1,
@@ -99,18 +100,18 @@ describe('resolveMemberDefinition 单文件光标定位成员定义', () => {
     const text =
       'Person <- R6Class("Person", public = list(greet = function() "hi"))\n' +
       'x <- greet';
-    const { files, uri } = singleFile(text);
+    const ctx = singleCtx(text);
     const cursor = text.indexOf('x <- greet') + 'x <- '.length + 2;
-    expect(resolveMemberDefinition(files, uri, cursor)).toBeNull();
+    expect(resolveMemberDefinition(ctx, cursor)).toBeNull();
   });
 
   it('类里没有这个成员 → null', () => {
     const text =
       'Person <- R6Class("Person", public = list(greet = function() "hi"))\n' +
       'Person$missing';
-    const { files, uri } = singleFile(text);
+    const ctx = singleCtx(text);
     const cursor = text.indexOf('Person$missing') + 'Person$'.length + 2;
-    expect(resolveMemberDefinition(files, uri, cursor)).toBeNull();
+    expect(resolveMemberDefinition(ctx, cursor)).toBeNull();
   });
 });
 
@@ -129,8 +130,9 @@ describe('resolveMemberDefinition 跨文件成员跳转', () => {
       { uri: 'analysis.R', text: fullCurrent },
       { uri: 'person.R', text: depText },
     ];
+    const ctx = createContext(files, 'analysis.R');
     const cursor = fullCurrent.indexOf('p$greet') + 'p$'.length + 2;
-    const result = resolveMemberDefinition(files, 'analysis.R', cursor);
+    const result = resolveMemberDefinition(ctx, cursor);
     expect(result).toEqual({
       name: 'greet',
       uri: 'person.R', // 目标在依赖文件！

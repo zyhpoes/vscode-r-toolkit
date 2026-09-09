@@ -4,10 +4,10 @@
  * 纯逻辑：不依赖 vscode，可在纯 Node 中测试。
  */
 
-import { tokenize } from '../parser/tokenizer';
 import { parseR6, type R6ClassDef, type R6Member, type R6Scope } from '../parser/r6-parser';
 import { TextLines } from '../utils/text';
 import type { SourceFile } from './source-file';
+import type { AnalysisContext } from './context';
 import { findClassAcrossFiles } from './definitions';
 import { resolveVarType } from './type-resolve';
 
@@ -21,21 +21,15 @@ export interface MemberDefinition {
 
 /**
  * 解析光标处的成员定义。
- * @param files         所有相关文件（当前文件 + 依赖文件）
- * @param cursorFileUri 光标在哪个文件
- * @param cursorOffset  光标偏移量
+ * @param ctx          分析上下文（含光标文件 tokens/文件清单）
+ * @param cursorOffset 光标偏移量
  * @returns 命中返回成员定义位置（带目标文件 uri）；未命中返回 null
  */
 export function resolveMemberDefinition(
-  files: SourceFile[],
-  cursorFileUri: string,
+  ctx: AnalysisContext,
   cursorOffset: number,
 ): MemberDefinition | null {
-  const cursorFile = files.find((f) => f.uri === cursorFileUri);
-  if (cursorFile === undefined) {
-    return null;
-  }
-  const tokens = tokenize(cursorFile.text);
+  const tokens = ctx.cursorTokens;
 
   // 找光标下的 identifier（findIndex 返回下标）
   const wordIdx = tokens.findIndex(
@@ -68,18 +62,18 @@ export function resolveMemberDefinition(
 
   if (before.text === 'self' || before.text === 'private') {
     // self/private 出现在方法体里，方法体在类定义所在文件内 → 反查光标文件里的类
-    const classes = parseR6(cursorFile.text);
+    const classes = parseR6(ctx.cursorFile.text);
     targetClass = classes.find((c) => c.stIndex <= wordIdx && wordIdx <= c.enIndex);
-    targetFile = cursorFile;
+    targetFile = ctx.cursorFile;
     scopes = before.text === 'self' ? ['public', 'active'] : ['private'];
   } else {
     // 类名$ 或 实例变量$（p$xxx）：
     // 先看 before 是不是已知类名（当前文件或依赖文件），不是则查 p 的类型
     let className: string | undefined;
-    if (findClassAcrossFiles(files, before.text) !== undefined) {
+    if (findClassAcrossFiles(ctx.files, before.text) !== undefined) {
       className = before.text; // 已知类名
     } else {
-      const type = resolveVarType(files, before.text, cursorFileUri, cursorOffset);
+      const type = resolveVarType(ctx, before.text, cursorOffset);
       if (type !== null && type.kind === 'class') {
         className = type.className;
       }
@@ -87,7 +81,7 @@ export function resolveMemberDefinition(
     if (className === undefined) {
       return null;
     }
-    const found = findClassAcrossFiles(files, className);
+    const found = findClassAcrossFiles(ctx.files, className);
     if (found === undefined) {
       return null;
     }

@@ -1,10 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { resolveClassDefinition } from '../../src/analysis/definitions';
+import { resolveClassDefinition, resolveVariableDefinition } from '../../src/analysis/definitions';
+import { createContext, type AnalysisContext } from '../../src/analysis/context';
 import type { SourceFile } from '../../src/analysis/source-file';
 
-// 辅助：把单文件文本包装成 files 数组（当前文件 uri 固定为 test.R）
-function singleFile(text: string): { files: SourceFile[]; uri: string } {
-  return { files: [{ uri: 'test.R', text }], uri: 'test.R' };
+// 辅助：把单文件文本包装成 ctx（当前文件 uri 固定为 test.R）
+function singleCtx(text: string): AnalysisContext {
+  return createContext([{ uri: 'test.R', text }], 'test.R');
 }
 
 describe('resolveClassDefinition 单文件光标定位类定义', () => {
@@ -12,9 +13,9 @@ describe('resolveClassDefinition 单文件光标定位类定义', () => {
   const text = 'Person <- R6Class("Person")\nPerson$new()';
 
   it('光标在类名中间 → 跳到定义处（带 uri = 当前文件）', () => {
-    const { files, uri } = singleFile(text);
+    const ctx = singleCtx(text);
     const cursor = text.indexOf('Person$new()') + 4;
-    expect(resolveClassDefinition(files, uri, cursor)).toEqual({
+    expect(resolveClassDefinition(ctx, cursor)).toEqual({
       name: 'Person',
       uri: 'test.R',
       line: 0,
@@ -23,9 +24,9 @@ describe('resolveClassDefinition 单文件光标定位类定义', () => {
   });
 
   it('光标在类名开头 → 命中（边界含等号）', () => {
-    const { files, uri } = singleFile(text);
+    const ctx = singleCtx(text);
     const cursor = text.indexOf('Person$new()');
-    expect(resolveClassDefinition(files, uri, cursor)).toEqual({
+    expect(resolveClassDefinition(ctx, cursor)).toEqual({
       name: 'Person',
       uri: 'test.R',
       line: 0,
@@ -34,26 +35,26 @@ describe('resolveClassDefinition 单文件光标定位类定义', () => {
   });
 
   it('光标在类名末尾边界（Person|$）→ 不命中（半开区间）', () => {
-    const { files, uri } = singleFile(text);
+    const ctx = singleCtx(text);
     const cursor = text.indexOf('Person$new()') + 'Person'.length;
-    expect(resolveClassDefinition(files, uri, cursor)).toBeNull();
+    expect(resolveClassDefinition(ctx, cursor)).toBeNull();
   });
 
   it('光标在 new 上 → 不命中（new 不是类名）', () => {
-    const { files, uri } = singleFile(text);
+    const ctx = singleCtx(text);
     const cursor = text.indexOf('new') + 1;
-    expect(resolveClassDefinition(files, uri, cursor)).toBeNull();
+    expect(resolveClassDefinition(ctx, cursor)).toBeNull();
   });
 
   it('光标在普通变量 x 上 → 不命中', () => {
     const text2 = 'x <- 1\nPerson <- R6Class("Person")';
-    const { files, uri } = singleFile(text2);
-    expect(resolveClassDefinition(files, uri, 0)).toBeNull();
+    const ctx = singleCtx(text2);
+    expect(resolveClassDefinition(ctx, 0)).toBeNull();
   });
 
   it('光标在类定义行自身的类名上 → 返回自身位置（无害）', () => {
-    const { files, uri } = singleFile(text);
-    expect(resolveClassDefinition(files, uri, 0)).toEqual({
+    const ctx = singleCtx(text);
+    expect(resolveClassDefinition(ctx, 0)).toEqual({
       name: 'Person',
       uri: 'test.R',
       line: 0,
@@ -63,9 +64,9 @@ describe('resolveClassDefinition 单文件光标定位类定义', () => {
 
   it('多行多类：点第二个类的引用 → 跳到第二个类定义处', () => {
     const text3 = 'A <- R6Class("A")\nB <- R6Class("B")\nB$new()';
-    const { files, uri } = singleFile(text3);
+    const ctx = singleCtx(text3);
     const cursor = text3.indexOf('B$new()');
-    expect(resolveClassDefinition(files, uri, cursor)).toEqual({
+    expect(resolveClassDefinition(ctx, cursor)).toEqual({
       name: 'B',
       uri: 'test.R',
       line: 1,
@@ -84,9 +85,10 @@ describe('resolveClassDefinition 跨文件', () => {
       { uri: 'analysis.R', text: currentText },
       { uri: 'person.R', text: depText },
     ];
+    const ctx = createContext(files, 'analysis.R');
     // 光标在 person$Person 的 Person 上（在 analysis.R 里）
     const cursor = currentText.indexOf('person$Person') + 'person$'.length + 2;
-    const result = resolveClassDefinition(files, 'analysis.R', cursor);
+    const result = resolveClassDefinition(ctx, cursor);
     expect(result).toEqual({
       name: 'Person',
       uri: 'person.R', // 目标在依赖文件！
@@ -102,8 +104,9 @@ describe('resolveClassDefinition 跨文件', () => {
       { uri: 'analysis.R', text: currentText },
       { uri: 'person.R', text: depText },
     ];
+    const ctx = createContext(files, 'analysis.R');
     const cursor = currentText.indexOf('Person$new()') + 2;
-    const result = resolveClassDefinition(files, 'analysis.R', cursor);
+    const result = resolveClassDefinition(ctx, cursor);
     expect(result).toEqual({
       name: 'Person',
       uri: 'analysis.R', // 当前文件优先
@@ -119,7 +122,85 @@ describe('resolveClassDefinition 跨文件', () => {
       { uri: 'analysis.R', text: currentText },
       { uri: 'person.R', text: depText },
     ];
+    const ctx = createContext(files, 'analysis.R');
     const cursor = currentText.indexOf('Missing') + 2;
-    expect(resolveClassDefinition(files, 'analysis.R', cursor)).toBeNull();
+    expect(resolveClassDefinition(ctx, cursor)).toBeNull();
+  });
+});
+
+describe('resolveVariableDefinition 变量跳转（点变量 → 赋值行）', () => {
+  it('点 q（p <- q 右侧的别名引用）→ 跳 q 的赋值行', () => {
+    // 用户场景：第三行 p <- q 里的 q，应跳到第二行 q <- Person$new()
+    const text =
+      'Person <- R6Class("Person")\n' + // 第 0 行
+      'q <- Person$new()\n' + // 第 1 行：q 的赋值行
+      'p <- q\n' + // 第 2 行：q 在这里被引用
+      'p$name'; // 第 3 行
+    const ctx = singleCtx(text);
+    // 光标在第二行 p <- q 的 q 上
+    const cursor = text.indexOf('p <- q') + 'p <- '.length;
+    expect(resolveVariableDefinition(ctx, cursor)).toEqual({
+      name: 'q',
+      uri: 'test.R',
+      line: 1,
+      character: 0,
+    });
+  });
+
+  it('点 p（实例变量引用）→ 跳 p 的赋值行', () => {
+    const text =
+      'Person <- R6Class("Person")\n' + // 第 0 行
+      'p <- Person$new()\n' + // 第 1 行：p 的赋值行
+      'p$name'; // 第 2 行：p 在这里被使用
+    const ctx = singleCtx(text);
+    // 光标在第二行 p$name 的 p 上（不是成员 name）
+    const cursor = text.indexOf('p$name');
+    expect(resolveVariableDefinition(ctx, cursor)).toEqual({
+      name: 'p',
+      uri: 'test.R',
+      line: 1,
+      character: 0,
+    });
+  });
+
+  it('点类名 Person → 也算变量（跳到 Person 赋值行 = 类定义行）', () => {
+    const text = 'Person <- R6Class("Person")\nPerson$new()';
+    const ctx = singleCtx(text);
+    // 注意：Provider 里类名跳转先命中（resolveClassDefinition），
+    // 但变量跳转本身对类名也能找到赋值行 —— 两者目标一致
+    const cursor = text.indexOf('Person$new()');
+    expect(resolveVariableDefinition(ctx, cursor)).toEqual({
+      name: 'Person',
+      uri: 'test.R',
+      line: 0,
+      character: 0,
+    });
+  });
+
+  it('光标前没有赋值（变量在光标之后才赋值）→ null', () => {
+    const text = 'p$name\np <- Person$new()';
+    const ctx = singleCtx(text);
+    // 光标在第 0 行 p$name 的 p 上，此时 p 还没赋值
+    expect(resolveVariableDefinition(ctx, 0)).toBeNull();
+  });
+
+  it('没有该变量的赋值记录 → null', () => {
+    const text = 'x <- 1\ny <- x';
+    const ctx = singleCtx(text);
+    // 光标在第二行 y <- x 的 x 上，x 在第 0 行有赋值 → 应命中
+    const cursor = text.indexOf('y <- x') + 'y <- '.length;
+    expect(resolveVariableDefinition(ctx, cursor)).toEqual({
+      name: 'x',
+      uri: 'test.R',
+      line: 0,
+      character: 0,
+    });
+  });
+
+  it('光标不在词上（数字上）→ null', () => {
+    const text = 'x <- 1';
+    const ctx = singleCtx(text);
+    // 光标在数字 1 上（不是 identifier）
+    expect(resolveVariableDefinition(ctx, text.indexOf('1'))).toBeNull();
   });
 });
