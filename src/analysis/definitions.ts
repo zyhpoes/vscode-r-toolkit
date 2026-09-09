@@ -7,9 +7,9 @@
  *   变量跳转   —— 光标词是普通变量 → 它最近一次赋值行（q <- Person$new()）
  */
 
-import { parseR6, type R6ClassDef } from '../parser/r6-parser';
+import type { R6ClassDef } from '../parser/r6-parser';
 import { TextLines } from '../utils/text';
-import type { SourceFile } from './source-file';
+import type { ParsedSourceFile, SourceFile } from './source-file';
 import type { AnalysisContext } from './context';
 
 /** 命中结果：名字 + 目标所在文件 + 定义位置（行列，0 起） */
@@ -45,7 +45,7 @@ export function resolveClassDefinition(
   }
 
   // 在所有文件里找同名类：当前文件优先（先出现先匹配），找不到再去依赖文件
-  const cls = findClassAcrossFiles(ctx.files, word.text);
+  const cls = findClassAcrossFiles(ctx.parsed, word.text);
   if (cls === undefined) {
     return null;
   }
@@ -96,33 +96,35 @@ export function resolveVariableDefinition(
   }
 
   // 把变量名的偏移量换算成行列
-  const pos = new TextLines(ctx.cursorFile.text).positionAt(targetOffset);
+  const pos = new TextLines(ctx.cursorParsed.file.text).positionAt(targetOffset);
   return {
     name: word.text,
-    uri: ctx.cursorFile.uri,
+    uri: ctx.cursorParsed.file.uri,
     line: pos.line,
     character: pos.character,
   };
 }
 
-/** 跨文件找类的结果：类定义 + 它所在文件 */
-interface ClassWithFile {
+/** 跨文件找类的结果：类定义 + 它所在文件。analysis 层通用的"带户口的类"配对，
+ *  类名跳转 / 成员跳转 / 继承链都用它（单一出处，避免各模块自造同名结构） */
+export interface ClassWithFile {
   classDef: R6ClassDef;
   file: SourceFile;
 }
 
 /**
  * 在所有文件里找名为 className 的类。
- * 按 files 顺序（当前文件在前，依赖文件在后）—— 先出现先匹配。
+ * 遍历"已解析清单"（context 已把每个文件解析过一次，这里零重复解析）。
+ * 按清单顺序（当前文件在前，依赖文件在后）—— 先出现先匹配。
  */
 export function findClassAcrossFiles(
-  files: SourceFile[],
+  parsed: ParsedSourceFile[],
   className: string,
 ): ClassWithFile | undefined {
-  for (const file of files) {
-    const cls = parseR6(file.text).find((c) => c.name === className);
+  for (const entry of parsed) {
+    const cls = entry.classes.find((c) => c.name === className);
     if (cls !== undefined) {
-      return { classDef: cls, file };
+      return { classDef: cls, file: entry.file };
     }
   }
   return undefined;

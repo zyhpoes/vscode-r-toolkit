@@ -1,14 +1,21 @@
 /**
- * 成员定义解析：给定多个文件 + 光标位置，判断光标下的成员引用
- * （self$xxx / private$xxx / 类名$xxx / 实例$xxx）指向哪个成员定义。
+ * 成员定义解析：光标在 `xxx$成员` 上时，判断成员定义在哪。
+ * 支持：self$ / private$ / super$ / 类名$ / 实例变量$。
  * 纯逻辑：不依赖 vscode，可在纯 Node 中测试。
+ *
+ * 一句话规则（R6 portable 语义，各分支注释里还会再讲"为什么"）：
+ *   self$     本类 + 继承来的 public/active
+ *   private$  只本类自己的 private（private 不随继承可见）
+ *   super$    父类链上的 public/active（不含本类，指"父类的同名成员"）
+ *   类名$ / 实例变量$   按名字或类型定位类，查 public/active（含继承来的）
  */
 
-import { parseR6, type R6ClassDef, type R6Member, type R6Scope } from '../parser/r6-parser';
+import type { R6Scope } from '../parser/r6-parser';
 import { TextLines } from '../utils/text';
 import type { SourceFile } from './source-file';
 import type { AnalysisContext } from './context';
-import { findClassAcrossFiles } from './definitions';
+import { findClassAcrossFiles, type ClassWithFile } from './definitions';
+import { findHierarchyMember } from './inheritance';
 import { resolveVarType } from './type-resolve';
 
 /** 命中结果：成员名 + 目标所在文件 + 定义位置（行列，0 起） */
@@ -18,6 +25,9 @@ export interface MemberDefinition {
   line: number;
   character: number;
 }
+
+/** 对外可见的区：self$/类名$/实例$/super$ 都只能看到这两类（private 外面看不见） */
+const PUBLIC_VISIBLE: R6Scope[] = ['public', 'active'];
 
 /**
  * 解析光标处的成员定义。
@@ -49,71 +59,116 @@ export function resolveMemberDefinition(
     return null;
   }
 
-  // 看 '$' 前是什么，确定"查哪个类、哪个区"
+  // 看 '$' 前是什么 → 决定"去哪找成员"
   const before = tokens[wordIdx - 2];
   if (before?.kind !== 'identifier') {
     return null;
   }
 
-  // ── 确定目标类 + 它所在文件 ────────────────────────────────────
-  let targetClass: R6ClassDef | undefined;
-  let targetFile: SourceFile;
-  let scopes: R6Scope[];
-
-  if (before.text === 'self' || before.text === 'private') {
-    // self/private 出现在方法体里，方法体在类定义所在文件内 → 反查光标文件里的类
-    const classes = parseR6(ctx.cursorFile.text);
-    targetClass = classes.find((c) => c.stIndex <= wordIdx && wordIdx <= c.enIndex);
-    targetFile = ctx.cursorFile;
-    scopes = before.text === 'self' ? ['public', 'active'] : ['private'];
-  } else {
-    // 类名$ 或 实例变量$（p$xxx）：
-    // 先看 before 是不是已知类名（当前文件或依赖文件），不是则查 p 的类型
-    let className: string | undefined;
-    if (findClassAcrossFiles(ctx.files, before.text) !== undefined) {
-      className = before.text; // 已知类名
-    } else {
-      const type = resolveVarType(ctx, before.text, cursorOffset);
-      if (type !== null && type.kind === 'class') {
-        className = type.className;
-      }
-    }
-    if (className === undefined) {
+  // ── super$：父类链上的成员（不含本类）──────────────────────────
+  if (before.text === 'super') {
+    // super 只能写在类方法体里：先反查"光标在哪个类中"，那个类就是"我"
+    const holder = containingClass(ctx, wordIdx);
+    if (holder === undefined) {
       return null;
     }
-    const found = findClassAcrossFiles(ctx.files, className);
-    if (found === undefined) {
+    // super$xxx = 父类的 xxx：从 holder 的父类起向上找（includeStart=false 跳过本类）
+    const hit = findHierarchyMember(ctx.parsed, holder, word.text, PUBLIC_VISIBLE, false);
+    if (hit === null) {
       return null;
     }
-    targetClass = found.classDef;
-    targetFile = found.file;
-    scopes = ['public', 'active'];
+    return buildResult(word.text, hit.node.file, hit.member.nameOffset);
   }
 
-  if (targetClass === undefined) {
+  // ── private$：只查本类自己的 private ──────────────────────────
+  if (before.text === 'private') {
+    // private 只能写在类方法体里：反查光标所在类
+    const holder = containingClass(ctx, wordIdx);
+    if (holder === undefined) {
+      return null;
+    }
+    // R6：private 不随继承 —— 子类看不到父类的 private，所以只在本类找、不往上走
+    const member = holder.classDef.members.find(
+      (m) => m.name === word.text && m.scope === 'private',
+    );
+    if (member !== undefined) {
+      return buildResult(word.text, holder.file, member.nameOffset);
+    }
+    // 本类没有这个 private → 兜底查合成成员（new）
+    return resolveSynthetic(holder, word.text);
+  }
+
+  // ── self$：本类 + 父类链的 public/active ───────────────────────
+  if (before.text === 'self') {
+    // self 也只能写在类方法体里：反查光标所在类
+    const holder = containingClass(ctx, wordIdx);
+    if (holder === undefined) {
+      return null;
+    }
+    // 继承来的方法 self 也能调：先本类后父类（includeStart=true，最近祖先优先）
+    const hit = findHierarchyMember(ctx.parsed, holder, word.text, PUBLIC_VISIBLE, true);
+    if (hit !== null) {
+      return buildResult(word.text, hit.node.file, hit.member.nameOffset);
+    }
+    // 本类和父类都没有 → 兜底查合成成员（new）
+    return resolveSynthetic(holder, word.text);
+  }
+
+  // ── 类名$ / 实例变量$（Person$greet / p$greet）─────────────────
+  // 类外的访问只能看到 public/active（含继承来的），private 一律看不见
+  const target = resolveNamedTarget(ctx, before.text, cursorOffset);
+  if (target === undefined) {
     return null;
   }
+  const hit = findHierarchyMember(ctx.parsed, target, word.text, PUBLIC_VISIBLE, true);
+  if (hit !== null) {
+    return buildResult(word.text, hit.node.file, hit.member.nameOffset);
+  }
+  return resolveSynthetic(target, word.text);
+}
 
-  // ── 找跳转目标：先在用户定义成员里找 ──────────────────────────
-  // 限定区：self$/类名$ 看 public+active，private$ 只看 private
-  const member = targetClass.members.find(
-    (m: R6Member) => m.name === word.text && scopes.includes(m.scope),
+/**
+ * 反查"光标所在类"：self/private/super 写在方法体里，
+ * 方法体在类的 R6Class 调用范围内 → 光标落在哪个类范围里，就是哪个类。
+ */
+function containingClass(ctx: AnalysisContext, wordIdx: number): ClassWithFile | undefined {
+  const classDef = ctx.cursorParsed.classes.find(
+    (c) => c.stIndex <= wordIdx && wordIdx <= c.enIndex,
   );
-
-  // 用户成员找到了 → 直接用它，跳转目标就是它的定义位置
-  if (member !== undefined) {
-    return buildResult(word.text, targetFile, member.nameOffset);
+  if (classDef === undefined) {
+    return undefined;
   }
+  return { classDef, file: ctx.cursorParsed.file };
+}
 
-  // ── 用户成员没找到 → 查合成成员（如 new）─────────────────────
-  // 合成成员是 R6 自动生成的（new 指向 initialize 或类定义），不限区，按名字找
-  const synthetic = targetClass.synthetic.find((s) => s.name === word.text);
-  if (synthetic !== undefined) {
-    return buildResult(word.text, targetFile, synthetic.nameOffset);
+/**
+ * 类名$ / 实例变量$ 的目标类定位，分两步：
+ *   Person$greet → Person 本身就是已知类名，直接命中；
+ *   p$greet       → p 不是类名，沿赋值链推断类型（p <- Person$new() → Person）。
+ */
+function resolveNamedTarget(
+  ctx: AnalysisContext,
+  name: string,
+  cursorOffset: number,
+): ClassWithFile | undefined {
+  const asClass = findClassAcrossFiles(ctx.parsed, name);
+  if (asClass !== undefined) {
+    return asClass;
   }
+  const type = resolveVarType(ctx, name, cursorOffset);
+  if (type !== null && type.kind === 'class') {
+    return findClassAcrossFiles(ctx.parsed, type.className);
+  }
+  return undefined;
+}
 
-  // 用户成员和合成成员都没有 → 无意义跳转
-  return null;
+/** 合成成员兜底：new 是 R6 自动生成的，每个类有自己的一份（指向本类 initialize 或类定义） */
+function resolveSynthetic(target: ClassWithFile, name: string): MemberDefinition | null {
+  const synthetic = target.classDef.synthetic.find((s) => s.name === name);
+  if (synthetic === undefined) {
+    return null;
+  }
+  return buildResult(name, target.file, synthetic.nameOffset);
 }
 
 /** 把成员偏移量换算成行列，组装成带目标文件 uri 的结果 */

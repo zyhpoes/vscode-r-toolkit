@@ -122,3 +122,93 @@ describe('parseR6 提取成员', () => {
     expect(parseR6(text)).toMatchObject([{ name: 'Person', nameOffset: 0, members: [] }]);
   });
 });
+
+describe('parseR6 提取 inherit（父类引用）', () => {
+  it('裸类名写法：inherit = Parent → kind name，className = Parent', () => {
+    const text =
+      'Parent <- R6Class("Parent")\n' +
+      'Child <- R6Class("Child", inherit = Parent, public = list())';
+    const result = parseR6(text);
+    // 偏移量：第二行 inherit 后面的 Parent token 起点
+    const inheritOffset = text.indexOf('Parent', text.indexOf('inherit'));
+    expect(result[1].inherit).toEqual({
+      kind: 'name',
+      className: 'Parent',
+      offset: inheritOffset,
+    });
+  });
+
+  it('$ 链写法（模块限定）：inherit = person$Parent → kind chain，className = 链尾名', () => {
+    const text = 'Child <- R6Class("Child", inherit = person$Parent)';
+    const result = parseR6(text);
+    expect(result[0].inherit).toEqual({
+      kind: 'chain',
+      className: 'Parent',
+      offset: text.indexOf('Parent'),
+    });
+  });
+
+  it('引号字符串写法：inherit = "Parent" → kind string，className = 字符串内容', () => {
+    const text = 'Child <- R6Class("Child", inherit = "Parent")';
+    const result = parseR6(text);
+    // 字符串 token 的偏移指向开引号位置（比 Parent 文本早 1 个字符）
+    expect(result[0].inherit).toEqual({
+      kind: 'string',
+      className: 'Parent',
+      offset: text.indexOf('Parent') - 1,
+    });
+  });
+
+  it('没写 inherit → inherit 为 undefined', () => {
+    const text = 'Person <- R6Class("Person", public = list())';
+    const result = parseR6(text);
+    expect(result[0].inherit).toBeUndefined();
+  });
+
+  it('inherit 参数在 public 之后也能识别（参数位置不固定）', () => {
+    const text =
+      'Parent <- R6Class("Parent")\n' +
+      'Child <- R6Class(\n' +
+      '  "Child",\n' +
+      '  public = list(foo = function() 1),\n' +
+      '  inherit = Parent\n' +
+      ')';
+    const result = parseR6(text);
+    expect(result[1].inherit).toEqual({
+      kind: 'name',
+      className: 'Parent',
+      offset: text.indexOf('Parent', text.indexOf('inherit')),
+    });
+  });
+
+  it('同时有 inherit 和成员区：两者都提取，互不干扰', () => {
+    const text =
+      'Parent <- R6Class("Parent")\n' +
+      'Child <- R6Class("Child", inherit = Parent,\n' +
+      '  public = list(foo = function() 1))';
+    const result = parseR6(text);
+    const child = result[1];
+    expect(child.inherit).toEqual({
+      kind: 'name',
+      className: 'Parent',
+      offset: text.indexOf('Parent', text.indexOf('inherit')),
+    });
+    expect(child.members.map((m) => m.name)).toEqual(['foo']);
+  });
+
+  it('inherit 后是函数调用形状（写法不认）→ inherit 为 undefined', () => {
+    const text = 'Child <- R6Class("Child", inherit = build_parent())';
+    const result = parseR6(text);
+    expect(result[0].inherit).toBeUndefined();
+  });
+
+  it('inherit 链尾是 new 调用（非法用法）→ 父类名取 new 前一个名字', () => {
+    const text = 'Child <- R6Class("Child", inherit = pkg$Parent$new())';
+    const result = parseR6(text);
+    expect(result[0].inherit).toEqual({
+      kind: 'chain',
+      className: 'Parent',
+      offset: text.indexOf('Parent'),
+    });
+  });
+});

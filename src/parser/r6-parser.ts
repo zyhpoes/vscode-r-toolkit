@@ -48,6 +48,9 @@ export interface R6ClassDef {
   /** 合成成员（R6 自动生成、非用户定义）。v1 只含 new：有 initialize 指向它，否则指向类名 */
   synthetic: SyntheticMember[];
 
+  /** 父类引用（inherit = X）；类没写 inherit → undefined */
+  inherit: InheritRef | undefined;
+
   /** 例子：Person <- R6Class("Person", ...) 里，stIndex = "R6Class" 的坐标 */
   stIndex: number;
   /** 同一个例子里，enIndex = 最外层配对 ')' 的坐标 */
@@ -58,6 +61,22 @@ export interface R6ClassDef {
 export interface SyntheticMember {
   name: string; // 合成成员名（如 'new'）
   nameOffset: number; // 跳转目标：initialize 的偏移（有）或类名偏移（无）
+}
+
+/**
+ * inherit 参数的父类引用（三种常见写法）。
+ * 例子：
+ *   inherit = A        → kind 'name'，className = A
+ *   inherit = pkg$A    → kind 'chain'，className = A（$ 链链尾名，模块限定的类）
+ *   inherit = "A"      → kind 'string'，className = A（引号字符串内容）
+ */
+export interface InheritRef {
+  /** 引用写法：裸类名 / $ 链（模块限定）/ 引号字符串 */
+  kind: 'name' | 'chain' | 'string';
+  /** 父类名（解析父类定义时按它找） */
+  className: string;
+  /** 父类名所在 token 的偏移（将来"点击 inherit 里的类名跳父类"可用） */
+  offset: number;
 }
 
 /** 从 R 代码文本中识别所有 R6 类定义 */
@@ -100,6 +119,7 @@ export function parseR6(text: string): R6ClassDef[] {
         nameOffset: cls.nameOffset,   // 类名的偏移量
         members,                      // 成员清单（public/private/active 提取结果）
         synthetic,                    // 合成成员（new）
+        inherit: extractInherit(tokens, openIndex, closeIndex), // 父类引用（inherit = X）
         stIndex: callName.stIndex,    // 调用名第一个 token 的下标（调用范围起点）
         enIndex: closeIndex,          // 配对 ')' 的下标（调用范围终点）
       });
@@ -228,6 +248,89 @@ function extractMembers(tokens: Token[], openIndex: number, closeIndex: number):
   }
 
   return members;
+}
+
+/**
+ * 从 R6Class 调用范围中提取父类引用（inherit = X）。
+ * 只认三种写法（其余表达式形状一律视为没写）：
+ *   inherit = A        → 裸类名（kind 'name'）
+ *   inherit = pkg$A    → $ 链（kind 'chain'，链尾名是父类名）
+ *   inherit = "A"      → 引号字符串（kind 'string'）
+ * 注意：inherit 参数在参数区的位置不固定（可能在 public/private 之后），
+ * 所以和 extractMembers 一样扫全部顶层参数块。
+ * @param openIndex  外层 '(' 的下标
+ * @param closeIndex 配对 ')' 的下标
+ * @returns 父类引用；没写 inherit / 写法不认 → undefined
+ */
+function extractInherit(
+  tokens: Token[],
+  openIndex: number,
+  closeIndex: number,
+): InheritRef | undefined {
+  const argRanges = splitTopLevel(tokens, openIndex, closeIndex);
+
+  for (const [start] of argRanges) {
+    // 块起点必须是 inherit（public/private/active 等其它参数块直接跳过）
+    if (tokens[start]?.kind !== 'identifier' || tokens[start].text !== 'inherit') {
+      continue;
+    }
+    // inherit 后必须跟 =
+    if (tokens[start + 1]?.kind !== 'operator' || tokens[start + 1].text !== '=') {
+      return undefined;
+    }
+    const ref = tokens[start + 2];
+    if (ref === undefined) {
+      return undefined; // inherit = 后漏写（代码不完整）
+    }
+
+    // 引号字符串写法：inherit = "A"（内容即父类名）
+    if (ref.kind === 'string') {
+      return { kind: 'string', className: ref.text, offset: ref.offset };
+    }
+
+    // 标识符写法：inherit = A 或 inherit = pkg$A
+    if (ref.kind === 'identifier') {
+      // 沿 $ 链走：名字与 $ 成对出现，每次 +2 移到下一个名字
+      let nameIdx = start + 2;
+      let isChain = false;
+      while (
+        tokens[nameIdx + 1]?.kind === 'operator' &&
+        tokens[nameIdx + 1].text === '$' &&
+        tokens[nameIdx + 2]?.kind === 'identifier'
+      ) {
+        nameIdx += 2;
+        isChain = true;
+      }
+
+      // 链尾若是 new 调用（pkg$A$new()，inherit 传实例是非法用法），
+      // 父类名取 new 前一个名字，避免把 new 当父类名（与 RHS 求值器的做法一致）
+      let clsIdx = nameIdx;
+      if (
+        isChain &&
+        tokens[clsIdx].text === 'new' &&
+        tokens[clsIdx + 1]?.kind === 'operator' &&
+        tokens[clsIdx + 1].text === '('
+      ) {
+        clsIdx -= 2;
+      }
+
+      // 最终名字后紧跟 '(' → 是函数调用形状（如 inherit = build()），写法不认
+      if (tokens[clsIdx + 1]?.kind === 'operator' && tokens[clsIdx + 1].text === '(') {
+        return undefined;
+      }
+
+      return {
+        kind: isChain ? 'chain' : 'name',
+        className: tokens[clsIdx].text,
+        offset: tokens[clsIdx].offset,
+      };
+    }
+
+    // 其它形状（表达式等）→ 不认
+    return undefined;
+  }
+
+  return undefined;
 }
 
 /**
