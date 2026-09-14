@@ -8,6 +8,7 @@
 // 现在要用运行时的 API（状态栏、注册 provider），所以用普通导入。
 import * as vscode from 'vscode';
 import { R6DefinitionProvider } from './providers/definition';
+import { R6DocumentSymbolProvider } from './providers/symbols';
 
 /**
  * 插件激活时调用。
@@ -26,6 +27,12 @@ export function activate(context: vscode.ExtensionContext): void {
   // 只作用于 R 文件，不碰其他语言 —— 与 vscode-R 共存的关键。
   context.subscriptions.push(
     vscode.languages.registerDefinitionProvider('r', new R6DefinitionProvider()),
+  );
+
+  // 给 R 语言注册"文档大纲"能力：类 → 区 → 成员。
+  // 驱动左侧「大纲」面板、编辑器顶部面包屑、Ctrl+Shift+O。
+  context.subscriptions.push(
+    vscode.languages.registerDocumentSymbolProvider('r', new R6DocumentSymbolProvider()),
   );
 
   // 备用确认：调试控制台里也能看到这行（用 warn 因为 lint 只允许 warn/error）

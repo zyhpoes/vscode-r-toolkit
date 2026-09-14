@@ -11,8 +11,11 @@
 
 - [x] **1. 识别 R6 类定义**（地基）✅ 已完成
       插件能认出 `R6Class(...)`，知道类名、成员（方法/字段/绑定/区）、定义位置。
-- [ ] **2. 文档大纲**
-      大纲面板显示树形结构：`类 → 方法 / 字段`，点击跳转。
+- [x] **2. 文档大纲** ✅ 已实现（暂缓完善）
+      大纲面板 / 面包屑 / `Ctrl+Shift+O` 显示树形结构：`类 → 区（public/private/active）→ 成员`，点击跳转。
+      已实现：空区不生成节点；区节点位置指向区关键字；v1 只列 R6 类（文件级函数/变量未列）。
+      待完善：① 成员范围只覆盖名字（未覆盖整个 `greet = function() {...}`）；
+      ② 成员图标不区分方法/字段（需要 parser 给 `R6Member` 加"是不是函数"标记）。
 - [x] **3. 定义跳转** ✅ 已完成
       类名跳转 ✅（含跨文件 person$Person）、`self$`/`private$`/`类名$` 成员跳转 ✅、
       实例 `p$xxx` ✅、合成成员 `new` ✅（有 initialize 跳它、否则跳类定义）；
@@ -72,7 +75,7 @@
 | 许可证 | `PolyForm-Noncommercial-1.0.0`：源码公开、可学习可修改，**禁止商业用途**；使用标准许可，避免自造条款的法律风险 |
 | VS Code 兼容 | `engines.vscode: ^1.135.0`（用户 VS Code 为 1.135.0），`@types/vscode: ~1.134.0`（官方 1.135.0 类型尚未发布，最新为 1.134.0；类型版本 ≤ 引擎版本保证安全，待官方发布后再同步升级） |
 | 技术架构 | 纯 TypeScript 扩展，**零运行时依赖**；内置自研解析器（不依赖 tree-sitter 等原生模块） |
-| 与 vscode-R 关系 | 独立扩展、共存：`onLanguage:r` 激活，不注册语言、不覆盖 vscode-R 已有能力 |
+| 与 vscode-R 关系 | **分工而非覆盖**：静态智能感知（跳转 / 补全 / 悬停 / 大纲）由本插件承担，用户**无需安装任何 R 包**即可用（vscode-R 的这类能力依赖 `languageserver` + `jsonlite`）；运行时功能（跑代码 / 终端 / 数据查看 / 绘图 / 帮助）交给 vscode-R。`onLanguage:r` 激活，不注册语言。两者同时启用时 VS Code 会**合并**各扩展的 provider（补全可能出现重复项、跳转可能出现多候选、大纲可能两套），本插件通过收窄触发范围与排序减少干扰，但**无法屏蔽对方的 provider**（VS Code 无此 API，也不能程序化禁用别的扩展） |
 | 工具链 | TS strict + esbuild 打包 + vitest 测试 + ESLint (typescript-eslint) + @vscode/vsce 打包 |
 | 分层原则 | 核心层（tokenizer / parser / analysis）**不 import vscode API**，只输出纯数据（位置用 `{line, character}`）；vscode 类型只在 Provider 边界转换，保证核心逻辑可在纯 Node 中单测 |
 | npm 权限方案 | A 方案：项目内 `.npmrc` 配置 `cache=.npm-cache`，避免写用户目录被沙箱拒绝 |
