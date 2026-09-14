@@ -11,13 +11,28 @@ import type { R6ClassDef } from '../parser/r6-parser';
 import { TextLines } from '../utils/text';
 import type { ParsedSourceFile, SourceFile } from './source-file';
 import type { AnalysisContext } from './context';
+import { findLatestBinding } from './bindings';
+import { findWordIndexAt } from './cursor';
 
-/** 命中结果：名字 + 目标所在文件 + 定义位置（行列，0 起） */
+/**
+ * 跳转命中结果：命中的名字 + 目标所在文件 + 定义位置（行列，0 起）。
+ * 类名跳转 / 变量跳转 / 成员跳转共用这一种形状
+ * （单一出处，成员跳转不再自造同形状的 MemberDefinition）。
+ */
 export interface DefinitionSite {
-  name: string; // 类名 / 变量名
+  name: string; // 命中的名字：类名 / 变量名 / 成员名
   uri: string; // 目标所在文件（恒有值：单文件时是当前文件，跨文件时是依赖文件）
   line: number; // 行号
   character: number; // 列号（用 character 而非 columns，因 VS Code 官方就叫 character）
+}
+
+/**
+ * 把"名字 + 目标文件 + 偏移量"组装成跳转结果（偏移量 → 行列）。
+ * 三种跳转（类名 / 变量 / 成员）共用这一处换算，避免各写一份走偏。
+ */
+export function definitionSiteAt(name: string, file: SourceFile, offset: number): DefinitionSite {
+  const pos = new TextLines(file.text).positionAt(offset);
+  return { name, uri: file.uri, line: pos.line, character: pos.character };
 }
 
 /**
@@ -31,18 +46,12 @@ export function resolveClassDefinition(
   ctx: AnalysisContext,
   cursorOffset: number,
 ): DefinitionSite | null {
-  // 找光标下的词：只在光标所在文件里找（ctx.cursorTokens 那份文本）
-  const tokens = ctx.cursorTokens;
-  // 边界用半开区间 [offset, offset+长度)：光标在词开头算命中，在词末尾不算
-  const word = tokens.find(
-    (t) =>
-      t.kind === 'identifier' &&
-      t.offset <= cursorOffset &&
-      cursorOffset < t.offset + t.text.length,
-  );
-  if (word === undefined) {
+  // 找光标下的词（只在光标所在文件里找：ctx.cursorTokens 那份文本）
+  const wordIdx = findWordIndexAt(ctx, cursorOffset);
+  if (wordIdx === -1) {
     return null;
   }
+  const word = ctx.cursorTokens[wordIdx];
 
   // 在所有文件里找同名类：当前文件优先（先出现先匹配），找不到再去依赖文件
   const cls = findClassAcrossFiles(ctx.parsed, word.text);
@@ -50,14 +59,7 @@ export function resolveClassDefinition(
     return null;
   }
 
-  // 把类名的偏移量换算成行列（VS Code 跳转需要的格式）
-  const pos = new TextLines(cls.file.text).positionAt(cls.classDef.nameOffset);
-  return {
-    name: cls.classDef.name,
-    uri: cls.file.uri,
-    line: pos.line,
-    character: pos.character,
-  };
+  return definitionSiteAt(cls.classDef.name, cls.file, cls.classDef.nameOffset);
 }
 
 /**
@@ -71,38 +73,20 @@ export function resolveVariableDefinition(
   ctx: AnalysisContext,
   cursorOffset: number,
 ): DefinitionSite | null {
-  // 找光标下的词（半开区间：光标在词开头算命中，在词末尾不算）
-  const word = ctx.cursorTokens.find(
-    (t) =>
-      t.kind === 'identifier' &&
-      t.offset <= cursorOffset &&
-      cursorOffset < t.offset + t.text.length,
-  );
-  if (word === undefined) {
+  // 找光标下的词
+  const wordIdx = findWordIndexAt(ctx, cursorOffset);
+  if (wordIdx === -1) {
     return null;
   }
+  const word = ctx.cursorTokens[wordIdx];
 
-  // 在 bindings 里找该变量"光标前最近一次"赋值（bindings 按顺序存，从后往前扫）
-  let targetOffset: number | undefined;
-  for (let i = ctx.bindings.length - 1; i >= 0; i--) {
-    const b = ctx.bindings[i];
-    if (b.varName === word.text && b.offset <= cursorOffset) {
-      targetOffset = b.offset;
-      break;
-    }
-  }
-  if (targetOffset === undefined) {
+  // 找该变量"光标前最近一次"赋值（逻辑在 bindings.ts，与类型推断共用同一份）
+  const binding = findLatestBinding(ctx.bindings, word.text, cursorOffset);
+  if (binding === undefined) {
     return null; // 光标前没有赋值（可能还没赋值，或根本不是变量）
   }
 
-  // 把变量名的偏移量换算成行列
-  const pos = new TextLines(ctx.cursorParsed.file.text).positionAt(targetOffset);
-  return {
-    name: word.text,
-    uri: ctx.cursorParsed.file.uri,
-    line: pos.line,
-    character: pos.character,
-  };
+  return definitionSiteAt(word.text, ctx.cursorParsed.file, binding.offset);
 }
 
 /** 跨文件找类的结果：类定义 + 它所在文件。analysis 层通用的"带户口的类"配对，

@@ -11,20 +11,11 @@
  */
 
 import type { R6Scope } from '../parser/r6-parser';
-import { TextLines } from '../utils/text';
-import type { SourceFile } from './source-file';
 import type { AnalysisContext } from './context';
-import { findClassAcrossFiles, type ClassWithFile } from './definitions';
+import { definitionSiteAt, findClassAcrossFiles, type ClassWithFile, type DefinitionSite } from './definitions';
 import { findHierarchyMember } from './inheritance';
 import { resolveVarType } from './type-resolve';
-
-/** 命中结果：成员名 + 目标所在文件 + 定义位置（行列，0 起） */
-export interface MemberDefinition {
-  name: string;
-  uri: string; // 目标所在文件（恒有值）
-  line: number;
-  character: number;
-}
+import { findWordIndexAt } from './cursor';
 
 /** 对外可见的区：self$/类名$/实例$/super$ 都只能看到这两类（private 外面看不见） */
 const PUBLIC_VISIBLE: R6Scope[] = ['public', 'active'];
@@ -38,16 +29,10 @@ const PUBLIC_VISIBLE: R6Scope[] = ['public', 'active'];
 export function resolveMemberDefinition(
   ctx: AnalysisContext,
   cursorOffset: number,
-): MemberDefinition | null {
+): DefinitionSite | null {
+  // 找光标下的 identifier（返回下标，后面要靠它回看前两个 token）
   const tokens = ctx.cursorTokens;
-
-  // 找光标下的 identifier（findIndex 返回下标）
-  const wordIdx = tokens.findIndex(
-    (t) =>
-      t.kind === 'identifier' &&
-      t.offset <= cursorOffset &&
-      cursorOffset < t.offset + t.text.length,
-  );
+  const wordIdx = findWordIndexAt(ctx, cursorOffset);
   if (wordIdx === -1) {
     return null;
   }
@@ -77,7 +62,7 @@ export function resolveMemberDefinition(
     if (hit === null) {
       return null;
     }
-    return buildResult(word.text, hit.node.file, hit.member.nameOffset);
+    return definitionSiteAt(word.text, hit.node.file, hit.member.nameOffset);
   }
 
   // ── private$：只查本类自己的 private ──────────────────────────
@@ -92,7 +77,7 @@ export function resolveMemberDefinition(
       (m) => m.name === word.text && m.scope === 'private',
     );
     if (member !== undefined) {
-      return buildResult(word.text, holder.file, member.nameOffset);
+      return definitionSiteAt(word.text, holder.file, member.nameOffset);
     }
     // 本类没有这个 private → 兜底查合成成员（new）
     return resolveSynthetic(holder, word.text);
@@ -108,7 +93,7 @@ export function resolveMemberDefinition(
     // 继承来的方法 self 也能调：先本类后父类（includeStart=true，最近祖先优先）
     const hit = findHierarchyMember(ctx.parsed, holder, word.text, PUBLIC_VISIBLE, true);
     if (hit !== null) {
-      return buildResult(word.text, hit.node.file, hit.member.nameOffset);
+      return definitionSiteAt(word.text, hit.node.file, hit.member.nameOffset);
     }
     // 本类和父类都没有 → 兜底查合成成员（new）
     return resolveSynthetic(holder, word.text);
@@ -122,7 +107,7 @@ export function resolveMemberDefinition(
   }
   const hit = findHierarchyMember(ctx.parsed, target, word.text, PUBLIC_VISIBLE, true);
   if (hit !== null) {
-    return buildResult(word.text, hit.node.file, hit.member.nameOffset);
+    return definitionSiteAt(word.text, hit.node.file, hit.member.nameOffset);
   }
   return resolveSynthetic(target, word.text);
 }
@@ -163,16 +148,10 @@ function resolveNamedTarget(
 }
 
 /** 合成成员兜底：new 是 R6 自动生成的，每个类有自己的一份（指向本类 initialize 或类定义） */
-function resolveSynthetic(target: ClassWithFile, name: string): MemberDefinition | null {
+function resolveSynthetic(target: ClassWithFile, name: string): DefinitionSite | null {
   const synthetic = target.classDef.synthetic.find((s) => s.name === name);
   if (synthetic === undefined) {
     return null;
   }
-  return buildResult(name, target.file, synthetic.nameOffset);
-}
-
-/** 把成员偏移量换算成行列，组装成带目标文件 uri 的结果 */
-function buildResult(name: string, file: SourceFile, nameOffset: number): MemberDefinition {
-  const pos = new TextLines(file.text).positionAt(nameOffset);
-  return { name, uri: file.uri, line: pos.line, character: pos.character };
+  return definitionSiteAt(name, target.file, synthetic.nameOffset);
 }

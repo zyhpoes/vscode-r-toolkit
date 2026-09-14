@@ -43,3 +43,26 @@ export function parseBindings(text: string): Binding[] {
 
   return bindings;
 }
+
+/**
+ * 找变量在"光标位置之前"最近一次赋值。
+ * bindings 按代码顺序排列，所以从尾部往前扫：第一条名字匹配且位置不超过光标的即为答案。
+ * 两条边界语义（改动会让行为悄悄变化，测试里有对应护栏）：
+ *   - 比较用 `offset <= cursorOffset`：光标正好落在赋值那个变量上也算命中
+ *   - 必须从尾往前扫：反过来取到的是最早那次赋值，与"最近一次"正好相反
+ * @param cursorOffset 光标偏移量：只在它之前找（之后的赋值属于"未来"，不算）
+ * @returns 命中的赋值记录；光标前没有该变量的赋值 → undefined
+ */
+export function findLatestBinding(
+  bindings: Binding[],
+  varName: string,
+  cursorOffset: number,
+): Binding | undefined {
+  for (let i = bindings.length - 1; i >= 0; i--) {
+    const b = bindings[i];
+    if (b.varName === varName && b.offset <= cursorOffset) {
+      return b;
+    }
+  }
+  return undefined;
+}

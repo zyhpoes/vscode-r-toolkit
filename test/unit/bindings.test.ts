@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseBindings } from '../../src/analysis/bindings';
+import { findLatestBinding, parseBindings } from '../../src/analysis/bindings';
 
 describe('parseBindings 扫描赋值（只记录，不分类）', () => {
   it('记录类定义：Person <- R6Class(...)', () => {
@@ -56,5 +56,48 @@ describe('parseBindings 扫描赋值（只记录，不分类）', () => {
       { varName: 'Person', stIndex: 2, offset: 0 },
       { varName: 'p', stIndex: 8, offset: 28 },
     ]);
+  });
+});
+
+describe('findLatestBinding 找光标前最近一次赋值', () => {
+  it('命中：查 q 返回 q 那条赋值（带 stIndex / offset）', () => {
+    const text =
+      'q <- Person$new()\n' + // q 的赋值：q(0) <-(1) Person(2) → stIndex=2、offset=0
+      'p <- q';
+    const bindings = parseBindings(text);
+    // 光标在文件末尾：两条赋值都在光标之前，查 q 应命中 q 那条
+    expect(findLatestBinding(bindings, 'q', text.length)).toEqual({
+      varName: 'q',
+      stIndex: 2,
+      offset: 0,
+    });
+  });
+
+  it('同一变量赋值两次 → 返回后面那一次（守住"从尾往前扫"的方向）', () => {
+    const text =
+      'x <- 1\n' + // 第 0 行：第一次赋值
+      'x <- 2'; // 第 1 行：第二次赋值（光标前最近的一次是它）
+    const bindings = parseBindings(text);
+    const hit = findLatestBinding(bindings, 'x', text.length);
+    expect(hit?.offset).toBe(text.indexOf('x', 1)); // 第二次 x 的位置，而不是第 0 行那个
+  });
+
+  it('光标之前没有该变量的赋值 → undefined（之后的赋值不算）', () => {
+    const text =
+      'p$name\n' + // 第 0 行：光标在这里，此时 p 还没被赋值
+      'p <- Person$new()'; // 第 1 行：赋值在光标之后
+    const bindings = parseBindings(text);
+    expect(findLatestBinding(bindings, 'p', 'p$name'.length)).toBeUndefined();
+  });
+
+  it('光标正好落在赋值处 → 也算命中（守住 <= 边界）', () => {
+    const text = 'q <- Person$new()';
+    const bindings = parseBindings(text);
+    // 光标落在变量名 q 的偏移 0 上：边界含等号，应命中
+    expect(findLatestBinding(bindings, 'q', 0)).toEqual({
+      varName: 'q',
+      stIndex: 2,
+      offset: 0,
+    });
   });
 });

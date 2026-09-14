@@ -7,6 +7,7 @@
  */
 
 import { tokenize, type Token } from '../parser/tokenizer';
+import { matchBracket } from '../parser/brackets';
 import { splitTopLevel } from '../parser/r6-parser';
 
 /** 模块路径的基准：从哪找模块文件 */
@@ -40,8 +41,8 @@ export function parseBoxImports(text: string): BoxImport[] {
       continue;
     }
 
-    // 找配对的 ')'（数圆括号深度）
-    const closeIndex = findCloseParen(tokens, openIndex);
+    // 找配对的 ')'（复用 parser 的括号工具：数同类括号深度，没配对返回 -1）
+    const closeIndex = matchBracket(tokens, openIndex, '(');
     if (closeIndex === -1) {
       continue; // 括号没配对（代码不完整），跳过
     }
@@ -66,26 +67,6 @@ function isBoxUseStart(tokens: Token[], i: number): boolean {
     tokens[i + 1]?.kind === 'operator' && tokens[i + 1].text === '::' &&
     tokens[i + 2]?.kind === 'identifier' && tokens[i + 2].text === 'use'
   );
-}
-
-/** 从 openIndex（'(' 下标）数圆括号深度，找配对 ')'；没配对返回 -1 */
-function findCloseParen(tokens: Token[], openIndex: number): number {
-  let depth = 1;
-  for (let j = openIndex + 1; j < tokens.length; j++) {
-    const t = tokens[j];
-    if (t.kind !== 'operator') {
-      continue;
-    }
-    if (t.text === '(') {
-      depth++;
-    } else if (t.text === ')') {
-      depth--;
-      if (depth === 0) {
-        return j;
-      }
-    }
-  }
-  return -1;
 }
 
 /**

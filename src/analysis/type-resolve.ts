@@ -12,7 +12,7 @@ import { r6CallTokenRange } from '../parser/r6-parser';
 import { nextNonComment } from '../parser/token-utils';
 import type { Token } from '../parser/tokenizer';
 import type { TextLines } from '../utils/text';
-import type { Binding } from './bindings';
+import { findLatestBinding, type Binding } from './bindings';
 import { evaluateRhs, type NameResolver } from './rhs-eval';
 import type { AnalysisContext } from './context';
 
@@ -84,15 +84,8 @@ function resolveVarTypeDFS(
   }
   visited.add(varName);
 
-  // 找 varName 在 cursorOffset 前"最近一次"赋值（bindings 按顺序存，取最后一条 ≤ cursorOffset 的）
-  let binding: Binding | undefined;
-  for (let i = bindings.length - 1; i >= 0; i--) {
-    const b = bindings[i];
-    if (b.varName === varName && b.offset <= cursorOffset) {
-      binding = b;
-      break;
-    }
-  }
+  // 找 varName 在光标前"最近一次"赋值（逻辑在 bindings.ts，与变量跳转共用同一份）
+  const binding = findLatestBinding(bindings, varName, cursorOffset);
   // DFS 终止条件三：光标位置前没有这条变量的赋值 → 追不到
   if (binding === undefined) {
     return null;

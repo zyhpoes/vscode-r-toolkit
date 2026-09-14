@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { resolveClassDefinition, resolveVariableDefinition } from '../../src/analysis/definitions';
+import { definitionSiteAt, resolveClassDefinition, resolveVariableDefinition } from '../../src/analysis/definitions';
 import { createContext, type AnalysisContext } from '../../src/analysis/context';
 import type { SourceFile } from '../../src/analysis/source-file';
 
@@ -202,5 +202,31 @@ describe('resolveVariableDefinition 变量跳转（点变量 → 赋值行）', 
     const ctx = singleCtx(text);
     // 光标在数字 1 上（不是 identifier）
     expect(resolveVariableDefinition(ctx, text.indexOf('1'))).toBeNull();
+  });
+});
+
+describe('definitionSiteAt 把偏移量组装成跳转结果', () => {
+  it('多行文本：偏移量换算成正确的行列，名字原样带上', () => {
+    const text =
+      'library(R6)\n' + // 第 0 行
+      'x <- 1\n' + // 第 1 行
+      'Person <- R6Class("Person")'; // 第 2 行：Person 在第 2 行第 0 列
+    const file: SourceFile = { uri: 'test.R', text };
+    expect(definitionSiteAt('Person', file, text.indexOf('Person'))).toEqual({
+      name: 'Person',
+      uri: 'test.R',
+      line: 2,
+      character: 0,
+    });
+  });
+
+  it('uri 原样透传（跨文件时目标文件的 uri 不会被换成别的）', () => {
+    const file: SourceFile = { uri: 'person.R', text: 'greet <- function() "hi"' };
+    expect(definitionSiteAt('greet', file, 0)).toEqual({
+      name: 'greet',
+      uri: 'person.R',
+      line: 0,
+      character: 0,
+    });
   });
 });
