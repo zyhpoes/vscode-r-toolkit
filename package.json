@@ -22,6 +22,21 @@
   "activationEvents": [
     "onLanguage:r"
   ],
+  "contributes": {
+    "configuration": {
+      "title": "R Toolkit",
+      "properties": {
+        "r-toolkit.boxPaths": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "markdownDescription": "box 模块根目录（等价于 R 里的 `options(box.path = ...)`，可写多个，按书写顺序依次查找）。留空则自动推断：先读项目级 `.Rprofile` 的 `box.path`，再退回 VS Code 工作区根。每个条目支持三种写法：绝对路径（`D:/proj/R`）、相对工作区根的相对路径（`R`）、以及 `${workspaceFolder}` 占位符（如 `${workspaceFolder}/R`）。"
+        }
+      }
+    }
+  },
   "main": "./dist/extension.js",
   "scripts": {
     "vscode:prepublish": "npm run build",
