@@ -26,7 +26,7 @@ function evalVar(text: string, varName: string): ReturnType<typeof evaluateRhs> 
   }
 
   // 类清单：从同一文本里的 R6Class 定义来（测试里简单场景类名即变量名）
-  const classes = parseR6(text);
+  const classes = parseR6(tokenize(text));
   const resolver = createNameResolver(classes);
   return evaluateRhs(tokens, rhsStart, { names: resolver, cursorOffset: 0 });
 }

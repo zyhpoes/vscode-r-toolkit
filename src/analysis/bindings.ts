@@ -7,7 +7,7 @@
  * 本文件只提供"最近一次赋值在哪"的索引。
  */
 
-import { tokenize } from '../parser/tokenizer';
+import type { Token } from '../parser/tokenizer';
 
 /** 一条赋值记录（只记录位置，不判断右侧是什么） */
 export interface Binding {
@@ -16,9 +16,11 @@ export interface Binding {
   offset: number; // varName 的位置（用于"最近赋值"判断）
 }
 
-/** 扫描全文所有赋值（一次性、不递归），按代码顺序返回 */
-export function parseBindings(text: string): Binding[] {
-  const tokens = tokenize(text);
+/**
+ * 从**已有 token** 里扫描所有赋值（一次性、不递归），按代码顺序返回。
+ * 切词由调用方负责（provider 切光标文件、parseSourceFile 切依赖文件，全项目只有这两处切词）。
+ */
+export function parseBindings(tokens: Token[]): Binding[] {
   const bindings: Binding[] = [];
 
   for (let i = 0; i < tokens.length; i++) {

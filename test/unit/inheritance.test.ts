@@ -1,16 +1,19 @@
 import { describe, expect, it } from 'vitest';
-import { parseR6 } from '../../src/parser/r6-parser';
 import {
   collectHierarchy,
   findHierarchyMember,
   resolveParentNode,
 } from '../../src/analysis/inheritance';
 import type { ClassWithFile } from '../../src/analysis/definitions';
-import type { ParsedSourceFile, SourceFile } from '../../src/analysis/source-file';
+import {
+  parseSourceFile,
+  type ParsedSourceFile,
+  type SourceFile,
+} from '../../src/analysis/source-file';
 
 // 辅助：把源文件清单解析成"预解析清单"（模仿 createContext 的封装：每文件解析一次）
 function parsedFiles(files: SourceFile[]): ParsedSourceFile[] {
-  return files.map((file) => ({ file, classes: parseR6(file.text) }));
+  return files.map((file) => parseSourceFile(file));
 }
 
 // 辅助：在预解析清单里定位类名对应的"类 + 文件"配对（测试夹具都用）
@@ -18,7 +21,7 @@ function nodeOf(parsed: ParsedSourceFile[], className: string): ClassWithFile {
   for (const entry of parsed) {
     const classDef = entry.classes.find((c) => c.name === className);
     if (classDef !== undefined) {
-      return { file: entry.file, classDef };
+      return { parsed: entry, classDef };
     }
   }
   throw new Error(`测试夹具里找不到类 ${className}`);
@@ -109,7 +112,7 @@ describe('collectHierarchy 收集继承链', () => {
     ]);
     const a = nodeOf(parsed, 'A');
     const names = collectHierarchy(parsed, a, true).map(
-      (n) => `${n.file.uri}:${n.classDef.name}`,
+      (n) => `${n.parsed.file.uri}:${n.classDef.name}`,
     );
     // 能终止且每个节点至多出现一次
     expect(names.length).toBeLessThanOrEqual(2);
@@ -217,7 +220,7 @@ describe('findHierarchyMember 沿继承链找成员', () => {
     const hit = findHierarchyMember(parsed, child, 'greet', ['public'], true);
     expect(hit).not.toBeNull();
     if (hit !== null) {
-      expect(hit.node.file.uri).toBe('person.R');
+      expect(hit.node.parsed.file.uri).toBe('person.R');
       expect(hit.node.classDef.name).toBe('Person');
     }
   });

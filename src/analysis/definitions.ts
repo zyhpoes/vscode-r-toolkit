@@ -8,8 +8,7 @@
  */
 
 import type { R6ClassDef } from '../parser/r6-parser';
-import { TextLines } from '../utils/text';
-import type { ParsedSourceFile, SourceFile } from './source-file';
+import type { ParsedSourceFile } from './source-file';
 import type { AnalysisContext } from './context';
 import { findLatestBinding } from './bindings';
 import { findWordIndexAt } from './cursor';
@@ -29,10 +28,15 @@ export interface DefinitionSite {
 /**
  * 把"名字 + 目标文件 + 偏移量"组装成跳转结果（偏移量 → 行列）。
  * 三种跳转（类名 / 变量 / 成员）共用这一处换算，避免各写一份走偏。
+ * 吃 ParsedSourceFile 而不是 SourceFile：行索引用它那儿已经算好的那份（不重扫全文）。
  */
-export function definitionSiteAt(name: string, file: SourceFile, offset: number): DefinitionSite {
-  const pos = new TextLines(file.text).positionAt(offset);
-  return { name, uri: file.uri, line: pos.line, character: pos.character };
+export function definitionSiteAt(
+  name: string,
+  target: ParsedSourceFile,
+  offset: number,
+): DefinitionSite {
+  const pos = target.lines.positionAt(offset);
+  return { name, uri: target.file.uri, line: pos.line, character: pos.character };
 }
 
 /**
@@ -46,12 +50,12 @@ export function resolveClassDefinition(
   ctx: AnalysisContext,
   cursorOffset: number,
 ): DefinitionSite | null {
-  // 找光标下的词（只在光标所在文件里找：ctx.cursorTokens 那份文本）
+  // 找光标下的词（只在光标所在文件里找：ctx.cursorFile.tokens 那份文本）
   const wordIdx = findWordIndexAt(ctx, cursorOffset);
   if (wordIdx === -1) {
     return null;
   }
-  const word = ctx.cursorTokens[wordIdx];
+  const word = ctx.cursorFile.tokens[wordIdx];
 
   // 在所有文件里找同名类：当前文件优先（先出现先匹配），找不到再去依赖文件
   const cls = findClassAcrossFiles(ctx.parsed, word.text);
@@ -59,7 +63,7 @@ export function resolveClassDefinition(
     return null;
   }
 
-  return definitionSiteAt(cls.classDef.name, cls.file, cls.classDef.nameOffset);
+  return definitionSiteAt(cls.classDef.name, cls.parsed, cls.classDef.nameOffset);
 }
 
 /**
@@ -78,22 +82,22 @@ export function resolveVariableDefinition(
   if (wordIdx === -1) {
     return null;
   }
-  const word = ctx.cursorTokens[wordIdx];
+  const word = ctx.cursorFile.tokens[wordIdx];
 
   // 找该变量"光标前最近一次"赋值（逻辑在 bindings.ts，与类型推断共用同一份）
-  const binding = findLatestBinding(ctx.bindings, word.text, cursorOffset);
+  const binding = findLatestBinding(ctx.cursorFile.bindings, word.text, cursorOffset);
   if (binding === undefined) {
     return null; // 光标前没有赋值（可能还没赋值，或根本不是变量）
   }
 
-  return definitionSiteAt(word.text, ctx.cursorParsed.file, binding.offset);
+  return definitionSiteAt(word.text, ctx.cursorFile, binding.offset);
 }
 
-/** 跨文件找类的结果：类定义 + 它所在文件。analysis 层通用的"带户口的类"配对，
+/** 跨文件找类的结果：类定义 + 它所在的那个"已解析文件"（带 lines/symbols 等全部产物）。
  *  类名跳转 / 成员跳转 / 继承链都用它（单一出处，避免各模块自造同名结构） */
 export interface ClassWithFile {
   classDef: R6ClassDef;
-  file: SourceFile;
+  parsed: ParsedSourceFile;
 }
 
 /**
@@ -108,7 +112,7 @@ export function findClassAcrossFiles(
   for (const entry of parsed) {
     const cls = entry.classes.find((c) => c.name === className);
     if (cls !== undefined) {
-      return { classDef: cls, file: entry.file };
+      return { classDef: cls, parsed: entry };
     }
   }
   return undefined;

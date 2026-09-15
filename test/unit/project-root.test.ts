@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   collectCandidateRoots,
+  findNearestRprofile,
   parseBoxPathRoots,
   rootsFromConfig,
   rootsFromWorkspace,
@@ -190,5 +191,106 @@ describe('collectCandidateRoots 编排', () => {
 
   it('三层都给不出结果 → 空数组（上层据此不跳转）', () => {
     expect(collectCandidateRoots({ config: [], workspace: [] })).toEqual([]);
+  });
+});
+
+// 来源2 的前置动作：从当前文件目录向上找最近的 .Rprofile（边界 = 工作区文件夹）
+describe('findNearestRprofile 向上找 .Rprofile', () => {
+  // 辅助：只有列出的文件算"存在" —— 让测试完全不碰磁盘
+  function existsOnly(...hitList: string[]): (ptr: string) => boolean {
+    return (ptr) => hitList.includes(ptr);
+  }
+
+  // 辅助：记录"问过哪些路径"，顺便让一切都"不存在"
+  function recordAsked(asked: string[]): (ptr: string) => boolean {
+    return (ptr) => {
+      asked.push(ptr);
+      return false;
+    };
+  }
+
+  it('起点目录自己就有 → 用它', () => {
+    const hit = 'D:/demo/.Rprofile';
+    expect(findNearestRprofile('D:/demo', 'D:/demo', existsOnly(hit))).toBe(hit);
+  });
+
+  it('起点没有、边界那一级有 → 用它（边界本身也要查）', () => {
+    const hit = 'D:/demo/.Rprofile';
+    expect(findNearestRprofile('D:/demo/R/model', 'D:/demo', existsOnly(hit))).toBe(hit);
+  });
+
+  it('多级都有 → 取**最近**的那一级，不是最上面那个', () => {
+    expect(
+      findNearestRprofile(
+        'D:/demo/R/model',
+        'D:/demo',
+        existsOnly('D:/demo/.Rprofile', 'D:/demo/R/.Rprofile'),
+      ),
+    ).toBe('D:/demo/R/.Rprofile');
+  });
+
+  it('边界内都没有 → undefined', () => {
+    expect(findNearestRprofile('D:/demo/R', 'D:/demo', existsOnly())).toBeUndefined();
+  });
+
+  it('边界之上有 .Rprofile 也不看（这是"不读用户级配置"的落地）', () => {
+    // D:/.Rprofile 在边界 D:/demo 之上，属于"项目外"，必须无视
+    expect(findNearestRprofile('D:/demo/R', 'D:/demo', existsOnly('D:/.Rprofile'))).toBeUndefined();
+  });
+
+  it('文件不在工作区里 → 直接 undefined，不上溯', () => {
+    expect(
+      findNearestRprofile('D:/outside/R', 'D:/demo', existsOnly('D:/outside/.Rprofile')),
+    ).toBeUndefined();
+  });
+
+  it('包含性判断要带分隔符：D:/demoo 不算在 D:/demo 里面', () => {
+    expect(findNearestRprofile('D:/demoo/R', 'D:/demo', existsOnly('D:/demoo/.Rprofile'))).toBe(
+      undefined,
+    );
+  });
+
+  it('边界是盘根时也认得出"在里面"（workspace 就开在 D:/）', () => {
+    const hit = 'D:/.Rprofile';
+    expect(findNearestRprofile('D:/demo/R', 'D:/', existsOnly(hit))).toBe(hit);
+  });
+
+  it('边界是 Unix 根时同样能走到根那一级', () => {
+    const hit = '/.Rprofile';
+    expect(findNearestRprofile('/home/me/proj', '/', existsOnly(hit))).toBe(hit);
+  });
+
+  it('边界是盘根、边界内没有时**不会死循环**（dirname 永远走不到 D:/）', () => {
+    // 没有兜底终止的话，这条会卡死：D:/demo → D: → . → . → ……
+    const asked: string[] = [];
+    expect(findNearestRprofile('D:/demo', 'D:/', recordAsked(asked))).toBeUndefined();
+    expect(asked).toEqual(['D:/demo/.Rprofile', 'D:/.Rprofile', '.Rprofile']);
+  });
+
+  it('试的目录顺序是"从近到远"，到边界为止', () => {
+    const asked: string[] = [];
+    findNearestRprofile('D:/demo/R/model', 'D:/demo', recordAsked(asked));
+    expect(asked).toEqual([
+      'D:/demo/R/model/.Rprofile',
+      'D:/demo/R/.Rprofile',
+      'D:/demo/.Rprofile',
+    ]);
+  });
+
+  it('尾斜杠不影响：起点 D:/demo/R/ 与边界 D:/demo/ 结果一样', () => {
+    const asked: string[] = [];
+    findNearestRprofile('D:/demo/R/', 'D:/demo/', recordAsked(asked));
+    expect(asked[0]).toBe('D:/demo/R/.Rprofile');
+  });
+
+  it('相对路径：归一化后照常工作（边界 proj，起点 proj/R）', () => {
+    const hit = 'proj/.Rprofile';
+    expect(findNearestRprofile('proj/R', 'proj', existsOnly(hit))).toBe(hit);
+  });
+
+  it('只认文件名恰好是 .Rprofile：site 级的 Rprofile.site 不算', () => {
+    expect(
+      findNearestRprofile('D:/demo', 'D:/demo', existsOnly('D:/demo/Rprofile.site')),
+    ).toBeUndefined();
   });
 });

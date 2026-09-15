@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { definitionSiteAt, resolveClassDefinition, resolveVariableDefinition } from '../../src/analysis/definitions';
 import { createContext, type AnalysisContext } from '../../src/analysis/context';
-import type { SourceFile } from '../../src/analysis/source-file';
+import { parseSourceFile, type SourceFile } from '../../src/analysis/source-file';
 
 // 辅助：把单文件文本包装成 ctx（当前文件 uri 固定为 test.R）
 function singleCtx(text: string): AnalysisContext {
@@ -212,7 +212,7 @@ describe('definitionSiteAt 把偏移量组装成跳转结果', () => {
       'x <- 1\n' + // 第 1 行
       'Person <- R6Class("Person")'; // 第 2 行：Person 在第 2 行第 0 列
     const file: SourceFile = { uri: 'test.R', text };
-    expect(definitionSiteAt('Person', file, text.indexOf('Person'))).toEqual({
+    expect(definitionSiteAt('Person', parseSourceFile(file), text.indexOf('Person'))).toEqual({
       name: 'Person',
       uri: 'test.R',
       line: 2,
@@ -222,7 +222,7 @@ describe('definitionSiteAt 把偏移量组装成跳转结果', () => {
 
   it('uri 原样透传（跨文件时目标文件的 uri 不会被换成别的）', () => {
     const file: SourceFile = { uri: 'person.R', text: 'greet <- function() "hi"' };
-    expect(definitionSiteAt('greet', file, 0)).toEqual({
+    expect(definitionSiteAt('greet', parseSourceFile(file), 0)).toEqual({
       name: 'greet',
       uri: 'person.R',
       line: 0,

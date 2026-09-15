@@ -1,5 +1,5 @@
 import * as path from 'path';
-import { isAbsoluteLike } from '../utils/paths';
+import { isAbsoluteLike, stripTrailingSep } from '../utils/paths';
 import { tokenize } from '../parser/tokenizer';
 import { matchBracket } from '../parser/brackets';
 import { nextNonComment } from '../parser/token-utils';
@@ -70,6 +70,62 @@ export function rootsFromConfig(entries: string[], workspaceFolders: string[]): 
     roots.push(...rootsFromConfigEntry(entry, workspaceFolders));
   }
   return roots;
+}
+
+/** `.Rprofile` 的文件名（只找这一个名字；用户级 `~/.Rprofile` 与 site 级 `Rprofile.site` 都不在范围内） */
+const RPROFILE_NAME = '.Rprofile';
+
+/**
+ * 来源2 的前置动作：从 stDir 起向上逐级找最近的 `.Rprofile`（含 stDir 这一级）。
+ * 只回答"文件在哪"，读它的内容由 provider 层负责。
+ *
+ * **边界（stStopDir = 工作区文件夹）**：只在这个范围内上溯，到边界那一级就停。
+ * 这条边界是"只解析项目级 `.Rprofile`"（不读用户级 `~/.Rprofile`）的落地方式 ——
+ * 只靠 `dirname` 上溯的话，工作区在用户目录下时必然经过 `C:/Users/me`，
+ * 会把用户级配置当项目配置读进来。
+ * 文件压根不在工作区里 → 直接返回 undefined（同样不认项目级配置）。
+ *
+ * 终止性：起点要么等于边界、要么在边界之下（否则上面已经返回），
+ * 每轮 `dirname` 都朝边界靠近一级，所以必然在边界那一级停下。
+ *
+ * @param stDir     起点目录（通常是当前文件所在目录），posix 形式
+ * @param stStopDir 边界目录（工作区文件夹），posix 形式；**必须传**，没有工作区就别调这个函数
+ * @param exists    判断文件是否存在（注入以便测试；接线时传 fs.existsSync）
+ * @returns `.Rprofile` 的路径（posix 形式）；边界内没有 → undefined
+ */
+export function findNearestRprofile(
+  stDir: string,
+  stStopDir: string,
+  exists: (ptr: string) => boolean,
+): string | undefined {
+  const stopDir = stripTrailingSep(path.posix.normalize(stStopDir));
+  let dir = stripTrailingSep(path.posix.normalize(stDir));
+
+  // 包含性判断要带分隔符（`D:/demoo` 不能被 `D:/demo` 认成"在里面"）；
+  // 边界自己是根（'/' 或 'D:/'）时已经在末尾带分隔符，直接用它。
+  // 这里不做大小写转换：两个路径都来自 VS Code，大小写一致。
+  const insidePrefix = stopDir.endsWith('/') ? stopDir : stopDir + '/';
+  if (dir !== stopDir && !dir.startsWith(insidePrefix)) {
+    return undefined;
+  }
+
+  while (true) {
+    const candidate = path.posix.join(dir, RPROFILE_NAME);
+    if (exists(candidate)) {
+      return candidate; // 最近的一级，找到就停
+    }
+    if (dir === stopDir) {
+      return undefined; // 边界那一级也查过了 → 不再上溯
+    }
+    const parent = path.posix.dirname(dir);
+    if (parent === dir) {
+      // 兜底终止：dirname 到了固定点（'/' 或 '.'）却始终没碰到边界。
+      // 这不是空想 —— 边界是**盘根** `D:/` 时就会走到这里：
+      // `dirname('D:/') === '.'`，靠"上溯到边界"永远碰不到 `D:/` 本身。
+      return undefined;
+    }
+    dir = parent;
+  }
 }
 
 /**

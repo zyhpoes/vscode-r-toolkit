@@ -35,7 +35,7 @@ export function resolveParentNode(
 
 /** 类身份（防环用）：文件 uri + 类名（同名不同文件是不同类） */
 function nodeKey(node: ClassWithFile): string {
-  return `${node.file.uri}::${node.classDef.name}`;
+  return `${node.parsed.file.uri}::${node.classDef.name}`;
 }
 
 /**

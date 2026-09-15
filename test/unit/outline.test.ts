@@ -5,7 +5,7 @@ import { buildOutline, type OutlineNode } from '../../src/analysis/outline';
 
 // 辅助：文本 → 大纲树（buildOutline 的输入契约：token + 类清单，同一份文本）
 function outlineOf(text: string) {
-  return buildOutline(parseR6(text), tokenize(text));
+  return buildOutline(parseR6(tokenize(text)), tokenize(text));
 }
 
 describe('buildOutline 把 R6 类整理成大纲树', () => {

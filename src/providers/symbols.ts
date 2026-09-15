@@ -9,7 +9,7 @@
 import * as vscode from 'vscode';
 import { buildOutline, type OutlineNode } from '../analysis/outline';
 import { createContext } from '../analysis/context';
-import { TextLines } from '../utils/text';
+import type { TextLines } from '../utils/text';
 
 /** 实现 VS Code 的"文档符号提供者"接口：打开/编辑 R 文件时被调用 */
 export class R6DocumentSymbolProvider implements vscode.DocumentSymbolProvider {
@@ -23,10 +23,11 @@ export class R6DocumentSymbolProvider implements vscode.DocumentSymbolProvider {
 
     // 只处理当前文件：类清单与 token 都取自它自己（大纲不涉及依赖文件）
     const ctx = createContext([{ uri, text }], uri);
-    const nodes = buildOutline(ctx.cursorParsed.classes, ctx.cursorTokens);
+    const nodes = buildOutline(ctx.cursorFile.classes, ctx.cursorFile.tokens);
 
     // 偏移量 → 行列：VS Code 的符号要的是行列范围
-    const lines = new TextLines(text);
+    // 行索引直接复用 ctx 里那份（createContext 已为这个文件建好），不重扫一遍全文
+    const lines = ctx.cursorFile.lines;
     return nodes.map((node) => toSymbol(node, lines));
   }
 }

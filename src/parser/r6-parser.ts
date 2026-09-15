@@ -9,7 +9,7 @@
  *   - 嵌套在其它调用内部的 R6Class 定义 → 跳过（v1 只认顶层类）
  */
 
-import { tokenize, type Token } from './tokenizer';
+import type { Token } from './tokenizer';
 import { matchBracket } from './brackets';
 
 /** 成员所属的区 */
@@ -79,9 +79,11 @@ export interface InheritRef {
   offset: number;
 }
 
-/** 从 R 代码文本中识别所有 R6 类定义 */
-export function parseR6(text: string): R6ClassDef[] {
-  const tokens = tokenize(text);
+/**
+ * 从**已有 token** 里识别所有 R6 类定义。
+ * 切词由调用方负责（provider 切光标文件、parseSourceFile 切依赖文件，全项目只有这两处切词）。
+ */
+export function parseR6(tokens: Token[]): R6ClassDef[] {
   const result: R6ClassDef[] = [];
 
   for (let i = 0; i < tokens.length; i++) {
@@ -350,7 +352,7 @@ export function splitTopLevel(
 ): Array<[number, number]> {
   const ranges: Array<[number, number]> = [];
   // 第一个块的起点 = 开括号的下一个 token（跳过 '(' 本身）
-  let stItem = openIndex + 1;
+  let stItemIndex = openIndex + 1;
   let depth = 0;
   // 从开括号的下一个开始，扫到闭括号前结束
   for (let j = openIndex + 1; j < closeIndex; j++) {
@@ -362,16 +364,16 @@ export function splitTopLevel(
       } else if (t.text === ')' || t.text === '}' || t.text === ']') {
         depth--; // 出嵌套
       } else if (t.text === ',' && depth === 0) {
-        // 顶层逗号：当前块结束（[stItem, j)），新块从逗号后开始
-        ranges.push([stItem, j]);
-        stItem = j + 1;
+        // 顶层逗号：当前块结束（[stItemIndex, j)），新块从逗号后开始
+        ranges.push([stItemIndex, j]);
+        stItemIndex = j + 1;
       }
     }
   }
-  // 最后一块没有"结尾逗号"触发收尾，所以循环结束后必须手动补上 [stItem, closeIndex)。
+  // 最后一块没有"结尾逗号"触发收尾，所以循环结束后必须手动补上 [stItemIndex, closeIndex)。
   // 反面例子：若不补，R6Class("Persion", public = list(...), private = list(...))
   // 只会切出 ["Persion", "public = list(...)"]，private 块会丢失。
-  ranges.push([stItem, closeIndex]);
+  ranges.push([stItemIndex, closeIndex]);
   return ranges;
 }
 

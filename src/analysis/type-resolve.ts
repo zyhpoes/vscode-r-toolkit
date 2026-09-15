@@ -39,10 +39,10 @@ export function resolveVarType(
 ): ResolvedType {
   // L1：只在光标所在文件里追踪变量（bindings 只记了光标文件的赋值）
   return resolveVarTypeDFS(
-    ctx.bindings,
-    ctx.cursorTokens,
+    ctx.cursorFile.bindings,
+    ctx.cursorFile.tokens,
     ctx.resolver,
-    ctx.lines,
+    ctx.cursorFile.lines,
     varName,
     cursorOffset,
     new Set(),

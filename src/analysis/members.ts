@@ -31,7 +31,7 @@ export function resolveMemberDefinition(
   cursorOffset: number,
 ): DefinitionSite | null {
   // 找光标下的 identifier（返回下标，后面要靠它回看前两个 token）
-  const tokens = ctx.cursorTokens;
+  const tokens = ctx.cursorFile.tokens;
   const wordIdx = findWordIndexAt(ctx, cursorOffset);
   if (wordIdx === -1) {
     return null;
@@ -62,7 +62,7 @@ export function resolveMemberDefinition(
     if (hit === null) {
       return null;
     }
-    return definitionSiteAt(word.text, hit.node.file, hit.member.nameOffset);
+    return definitionSiteAt(word.text, hit.node.parsed, hit.member.nameOffset);
   }
 
   // ── private$：只查本类自己的 private ──────────────────────────
@@ -77,7 +77,7 @@ export function resolveMemberDefinition(
       (m) => m.name === word.text && m.scope === 'private',
     );
     if (member !== undefined) {
-      return definitionSiteAt(word.text, holder.file, member.nameOffset);
+      return definitionSiteAt(word.text, holder.parsed, member.nameOffset);
     }
     // 本类没有这个 private → 兜底查合成成员（new）
     return resolveSynthetic(holder, word.text);
@@ -93,7 +93,7 @@ export function resolveMemberDefinition(
     // 继承来的方法 self 也能调：先本类后父类（includeStart=true，最近祖先优先）
     const hit = findHierarchyMember(ctx.parsed, holder, word.text, PUBLIC_VISIBLE, true);
     if (hit !== null) {
-      return definitionSiteAt(word.text, hit.node.file, hit.member.nameOffset);
+      return definitionSiteAt(word.text, hit.node.parsed, hit.member.nameOffset);
     }
     // 本类和父类都没有 → 兜底查合成成员（new）
     return resolveSynthetic(holder, word.text);
@@ -107,7 +107,7 @@ export function resolveMemberDefinition(
   }
   const hit = findHierarchyMember(ctx.parsed, target, word.text, PUBLIC_VISIBLE, true);
   if (hit !== null) {
-    return definitionSiteAt(word.text, hit.node.file, hit.member.nameOffset);
+    return definitionSiteAt(word.text, hit.node.parsed, hit.member.nameOffset);
   }
   return resolveSynthetic(target, word.text);
 }
@@ -117,13 +117,13 @@ export function resolveMemberDefinition(
  * 方法体在类的 R6Class 调用范围内 → 光标落在哪个类范围里，就是哪个类。
  */
 function containingClass(ctx: AnalysisContext, wordIdx: number): ClassWithFile | undefined {
-  const classDef = ctx.cursorParsed.classes.find(
+  const classDef = ctx.cursorFile.classes.find(
     (c) => c.stIndex <= wordIdx && wordIdx <= c.enIndex,
   );
   if (classDef === undefined) {
     return undefined;
   }
-  return { classDef, file: ctx.cursorParsed.file };
+  return { classDef, parsed: ctx.cursorFile };
 }
 
 /**
@@ -153,5 +153,5 @@ function resolveSynthetic(target: ClassWithFile, name: string): DefinitionSite |
   if (synthetic === undefined) {
     return null;
   }
-  return definitionSiteAt(name, target.file, synthetic.nameOffset);
+  return definitionSiteAt(name, target.parsed, synthetic.nameOffset);
 }

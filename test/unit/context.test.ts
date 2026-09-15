@@ -11,13 +11,14 @@ describe('createContext 组装查询上下文', () => {
     ];
     const ctx = createContext(files, 'analysis.R');
 
-    // 光标文件相关：cursorParsed 指向光标所在文件的解析结果
-    expect(ctx.cursorParsed.file.uri).toBe('analysis.R');
-    expect(ctx.cursorTokens.length).toBeGreaterThan(0);
+    // 光标文件相关：cursorFile 指向光标所在文件的解析结果（= parsed 里的那一项）
+    expect(ctx.cursorFile.file.uri).toBe('analysis.R');
+    expect(ctx.cursorFile).toBe(ctx.parsed[0]); // 派生指针，不是副本
+    expect(ctx.cursorFile.tokens.length).toBeGreaterThan(0);
     // lines：光标文件的行索引（p$name 在第 2 行）
-    expect(ctx.lines.positionAt(text.indexOf('p$name')).line).toBe(2);
+    expect(ctx.cursorFile.lines.positionAt(text.indexOf('p$name')).line).toBe(2);
     // 绑定：类定义 + 实例创建 两条（记录顺序 = 代码顺序）
-    expect(ctx.bindings.map((b) => b.varName)).toEqual(['Person', 'p']);
+    expect(ctx.cursorFile.bindings.map((b) => b.varName)).toEqual(['Person', 'p']);
     // resolver：当前文件与依赖文件的类都认得（跨文件查询的基础）
     expect(ctx.resolver.isClass('Person')).toBe(true);
     expect(ctx.resolver.isClass('Employee')).toBe(true);

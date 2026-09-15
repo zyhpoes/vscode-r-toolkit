@@ -23,10 +23,15 @@ export function activate(context: vscode.ExtensionContext): void {
   // 登记进订阅：插件被卸载时 VS Code 会自动销毁它，不用手动清理
   context.subscriptions.push(statusBar);
 
+  // 诊断输出通道：box 模块找不到、候选根是什么，都写进这里
+  // （「输出」面板右上角下拉选 "R Toolkit"）。不静默失败是硬要求。
+  const output = vscode.window.createOutputChannel('R Toolkit');
+  context.subscriptions.push(output);
+
   // 给 R 语言注册"定义跳转"能力（Ctrl+点击 / F12 触发）。
   // 只作用于 R 文件，不碰其他语言 —— 与 vscode-R 共存的关键。
   context.subscriptions.push(
-    vscode.languages.registerDefinitionProvider('r', new R6DefinitionProvider()),
+    vscode.languages.registerDefinitionProvider('r', new R6DefinitionProvider(output)),
   );
 
   // 给 R 语言注册"文档大纲"能力：类 → 区 → 成员。
