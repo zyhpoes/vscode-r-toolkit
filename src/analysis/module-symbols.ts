@@ -54,6 +54,74 @@ export function parseTopLevelSymbols(tokens: Token[]): TopLevelSymbol[] {
 }
 
 /**
+ * `模块绑定名` 本身（`schema$xxx` 里的 `schema`、`box::use(m = ...)` 里的 `m`）→ 模块文件。
+ *
+ * @param moduleUriByBinding 模块绑定名 → 模块文件 uri（与成员跳转共用同一张表）
+ * @returns 模块文件 uri（跳转方落在文件第 1 行）；光标下的词不是模块绑定名 → null
+ */
+export function resolveModuleBindingFile(
+  ctx: AnalysisContext,
+  cursorOffset: number,
+  moduleUriByBinding: Map<string, string>,
+): string | null {
+  const wordIndex = findWordIndexAt(ctx, cursorOffset);
+  if (wordIndex === -1) {
+    return null;
+  }
+  return moduleUriByBinding.get(ctx.cursorFile.tokens[wordIndex].text) ?? null;
+}
+
+/** 附着清单里的一个名字：本地名 → 模块文件 + 模块**内**的名字 */
+export interface AttachNameTarget {
+  /** 模块文件 uri（provider 解析出文件后给出） */
+  moduleUri: string;
+  /** 模块内的名字（`[g = f]` 的 f；只写 `[a]` 时与本地名相同） */
+  source: string;
+}
+
+/**
+ * 附着清单引入的名字（`box::use(mod[a, FI = FieldInfo])` 里的 `a` / `FI`）→ 模块里那个定义。
+ *
+ * 位置约定：本函数在查询链**最后**兜底 —— 本地的类名/变量优先（R 里后写的赋值会覆盖导入进来的绑定）。
+ * 形状约定：前面紧跟 `$` 的（`p$FieldInfo`）是成员访问，不是裸名字，直接交给别的分支。
+ *
+ * @param attachByName 本地名 → { 模块文件 uri, 模块内名 }（provider 从 `BoxImport.attach` 建好传入）
+ * @returns 命中结果；不在附着表里、模块没加载、或模块里没有那个符号 → null
+ */
+export function resolveAttachNameDefinition(
+  ctx: AnalysisContext,
+  cursorOffset: number,
+  attachByName: Map<string, AttachNameTarget>,
+): DefinitionSite | null {
+  const wordIndex = findWordIndexAt(ctx, cursorOffset);
+  if (wordIndex === -1) {
+    return null;
+  }
+
+  const prev = ctx.cursorFile.tokens[wordIndex - 1];
+  if (prev?.kind === 'operator' && prev.text === '$') {
+    return null; // 成员访问形状，不是附着进来的裸名字
+  }
+
+  const target = attachByName.get(ctx.cursorFile.tokens[wordIndex].text);
+  if (target === undefined) {
+    return null;
+  }
+
+  const moduleFile = ctx.parsed.find((p) => p.file.uri === target.moduleUri);
+  if (moduleFile === undefined) {
+    return null; // 模块文件没被加载（读不出来），跳不了
+  }
+
+  const symbol = moduleFile.symbols.find((one) => one.name === target.source);
+  if (symbol === undefined) {
+    return null; // 模块里没有这个名字（例如它是函数体内部的局部变量）
+  }
+
+  return definitionSiteAt(symbol.name, moduleFile, symbol.offset);
+}
+
+/**
  * `模块$成员` 的成员跳转：光标踩在 `$` 后面的名字上时，去该模块文件里找同名顶层符号。
  *
  * @param moduleUriByBinding 模块绑定名 → 模块文件 uri。绑定名是"本文件里这个模块叫什么"

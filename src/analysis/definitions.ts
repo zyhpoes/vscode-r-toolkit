@@ -9,6 +9,7 @@
 
 import type { R6ClassDef } from '../parser/r6-parser';
 import type { ParsedSourceFile } from './source-file';
+import type { TopLevelSymbol } from './module-symbols';
 import type { AnalysisContext } from './context';
 import { findLatestBinding } from './bindings';
 import { findWordIndexAt } from './cursor';
@@ -84,13 +85,28 @@ export function resolveVariableDefinition(
   }
   const word = ctx.cursorFile.tokens[wordIdx];
 
-  // 找该变量"光标前最近一次"赋值（逻辑在 bindings.ts，与类型推断共用同一份）
+  // 首选：该变量"光标前最近一次"赋值（逻辑在 bindings.ts，与类型推断共用同一份）
   const binding = findLatestBinding(ctx.cursorFile.bindings, word.text, cursorOffset);
-  if (binding === undefined) {
+  if (binding !== undefined) {
+    return definitionSiteAt(word.text, ctx.cursorFile, binding.offset);
+  }
+
+  // 兜底：顶层用 `=` 定义的（bindings 只记 `<-`，而 symbols 两种赋值号都记）
+  // 两条约束与主路径保持一致：
+  //   ① 只看**光标之前**的赋值（否则会把"后面才赋值"的当定义，跳向未来）；
+  //   ② 取**最后一次**（= 最近一次）——与 findLatestBinding 的语义相同。
+  // 已知偏差：symbols 不含以 `.` 开头的隐藏名 → `.x = 1` 这种（隐藏名 + 等号）仍不跳。
+  let hit: TopLevelSymbol | undefined;
+  for (const symbol of ctx.cursorFile.symbols) {
+    if (symbol.name === word.text && symbol.offset <= cursorOffset) {
+      hit = symbol;
+    }
+  }
+  if (hit === undefined) {
     return null; // 光标前没有赋值（可能还没赋值，或根本不是变量）
   }
 
-  return definitionSiteAt(word.text, ctx.cursorFile, binding.offset);
+  return definitionSiteAt(hit.name, ctx.cursorFile, hit.offset);
 }
 
 /** 跨文件找类的结果：类定义 + 它所在的那个"已解析文件"（带 lines/symbols 等全部产物）。

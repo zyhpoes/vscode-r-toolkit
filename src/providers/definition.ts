@@ -19,7 +19,12 @@ import { createContextFromParsed, type AnalysisContext } from '../analysis/conte
 import { findTokenIndexAt } from '../analysis/cursor';
 import { moduleBindingName, modulePathOf, parseBoxImports, segmentAtOffset, type BoxImport } from '../analysis/box';
 import { baseDirsForImport, resolveModuleFilePath } from '../analysis/module-file';
-import { resolveModuleMemberDefinition } from '../analysis/module-symbols';
+import {
+  resolveAttachNameDefinition,
+  resolveModuleBindingFile,
+  resolveModuleMemberDefinition,
+  type AttachNameTarget,
+} from '../analysis/module-symbols';
 import { resolveBoxRoots } from './box-roots';
 import { toPosix } from '../utils/paths';
 import { tokenize } from '../parser/tokenizer';
@@ -78,9 +83,16 @@ export class R6DefinitionProvider implements vscode.DefinitionProvider {
     // （放在最前面：用户在 import 路径上点击，意图明确就是"去这个模块"）
     const moduleFile = locateModuleFile(ctx, cursorOffset, imports, document, rootDirs);
     if (moduleFile !== null) {
-      // 模块跳转落在文件开头（第 1 行第 1 列）
-      const location = new vscode.Location(vscode.Uri.file(moduleFile), new vscode.Position(0, 0));
+      const location = moduleFileLocation(vscode.Uri.file(moduleFile));
       this.logHit('模块', location);
+      return location;
+    }
+
+    // 再试"模块绑定名"本身：`schema$xxx` 里的 schema、`box::use(m = ...)` 里的 m → 跳模块文件
+    const bindingFileUri = resolveModuleBindingFile(ctx, cursorOffset, boxModules.urisByName);
+    if (bindingFileUri !== null) {
+      const location = moduleFileLocation(vscode.Uri.parse(bindingFileUri));
+      this.logHit('模块名', location);
       return location;
     }
 
@@ -103,10 +115,17 @@ export class R6DefinitionProvider implements vscode.DefinitionProvider {
       return this.returnSite('类名', classDef);
     }
 
-    // 最后试变量跳转（普通变量 → 它的赋值行；类名已在上一步命中，到不了这里）
+    // 再试变量跳转（普通变量 → 它的赋值行；类名已在上一步命中，到不了这里）
     const varDef = resolveVariableDefinition(ctx, cursorOffset);
     if (varDef !== null) {
       return this.returnSite('变量', varDef);
+    }
+
+    // 最后兜底：附着清单引入的名字（`[FieldInfo]`、`[FI = FieldInfo]` 的 FI、`[get_label]`）
+    // 放最后是因为 R 里后写的赋值会覆盖导入进来的绑定 —— 本地优先、附着兜底
+    const attachName = resolveAttachNameDefinition(ctx, cursorOffset, boxModules.attachByName);
+    if (attachName !== null) {
+      return this.returnSite('附着名', attachName);
     }
 
     // 都不是 → null（编辑器显示"未找到定义"）
@@ -130,6 +149,11 @@ export class R6DefinitionProvider implements vscode.DefinitionProvider {
       `[def] 命中 ${branch} → ${location.uri.fsPath}:${location.range.start.line + 1}`,
     );
   }
+}
+
+/** 模块文件跳转统一落在文件开头（第 1 行第 1 列） */
+function moduleFileLocation(uri: vscode.Uri): vscode.Location {
+  return new vscode.Location(uri, new vscode.Position(0, 0));
 }
 
 /** 光标位置的简短描述（日志用） */
@@ -169,6 +193,8 @@ interface BoxModules {
   files: SourceFile[];
   /** 模块绑定名 → 模块文件 uri（`schema$xxx` 成员跳转用；附着写法不绑名，不进这张表） */
   urisByName: Map<string, string>;
+  /** 附着清单本地名 → { 模块文件 uri, 模块内名 }（`[FieldInfo]` / `[FI = FieldInfo]` 跳转用） */
+  attachByName: Map<string, AttachNameTarget>;
 }
 
 /**
@@ -184,6 +210,7 @@ async function loadBoxModules(
 ): Promise<BoxModules> {
   const files: SourceFile[] = [];
   const urisByName = new Map<string, string>();
+  const attachByName = new Map<string, AttachNameTarget>();
 
   for (const imp of imports) {
     // 加载依赖要的是"整条路径对应的文件"，所以段号取最后一段
@@ -199,19 +226,26 @@ async function loadBoxModules(
     try {
       // 交给 VS Code 打开：能拿到用户未保存的缓冲区内容，比自己 fs 读更准
       const depDoc = await vscode.workspace.openTextDocument(vscode.Uri.file(filePath));
-      files.push({ uri: depDoc.uri.toString(), text: depDoc.getText() });
+      const depUri = depDoc.uri.toString();
+      files.push({ uri: depUri, text: depDoc.getText() });
 
       // 模块绑定名（`box::use(R/schema/schema)` → schema；别名写法取别名）
       const bindingName = moduleBindingName(imp);
       if (bindingName !== undefined) {
-        urisByName.set(bindingName, depDoc.uri.toString());
+        urisByName.set(bindingName, depUri);
+      }
+
+      // 附着清单：每个本地名都指向"这个模块文件 + 模块内那个名字"
+      // （同名写法 `[a]` 的 source 也是 a；重命名 `[g = f]` 才需要 source 区分）
+      for (const attachName of imp.attach?.names ?? []) {
+        attachByName.set(attachName.alias, { moduleUri: depUri, source: attachName.source });
       }
     } catch (error) {
       output.appendLine(`[box] 依赖文件打不开：${filePath}（${String(error)}）`);
     }
   }
 
-  return { files, urisByName };
+  return { files, urisByName, attachByName };
 }
 
 /**

@@ -2,7 +2,10 @@ import { describe, expect, it } from 'vitest';
 import { tokenize } from '../../src/parser/tokenizer';
 import {
   parseTopLevelSymbols,
+  resolveAttachNameDefinition,
+  resolveModuleBindingFile,
   resolveModuleMemberDefinition,
+  type AttachNameTarget,
 } from '../../src/analysis/module-symbols';
 import { createContext, type AnalysisContext } from '../../src/analysis/context';
 
@@ -179,5 +182,158 @@ describe('resolveModuleMemberDefinition 模块$成员 跳转', () => {
       'test.R',
     );
     expect(resolveModuleMemberDefinition(ctx, text.indexOf('.hidden') + 2, schemaBinding())).toBeNull();
+  });
+});
+
+describe('resolveModuleBindingFile 模块绑定名 → 模块文件', () => {
+  const cursorText = ['box::use(R/schema/schema)', 'x <- schema$get_label(1)', 'y <- schema'].join(
+    '\n',
+  );
+
+  function ctxOf(): AnalysisContext {
+    return createContext(
+      [
+        { uri: 'test.R', text: cursorText },
+        { uri: 'schema.R', text: 'get_label <- function() 1' },
+      ],
+      'test.R',
+    );
+  }
+
+  const bindings = new Map([['schema', 'schema.R']]);
+
+  it('点 `schema$xxx` 里的 schema 本身 → 命中模块文件 uri', () => {
+    const ctx = ctxOf();
+    // 第二行 'x <- schema$get_label(1)'：schema 的起点（'schema$' 首次出现处）
+    const offset = cursorText.indexOf('schema$');
+    expect(resolveModuleBindingFile(ctx, offset + 1, bindings)).toBe('schema.R');
+  });
+
+  it('单独用模块名（`y <- schema`）点它 → 也命中', () => {
+    const ctx = ctxOf();
+    const offset = cursorText.lastIndexOf('schema');
+    expect(resolveModuleBindingFile(ctx, offset + 1, bindings)).toBe('schema.R');
+  });
+
+  it('点 `$` 后面的成员名 → 不命中（那属于成员跳转）', () => {
+    const ctx = ctxOf();
+    const offset = cursorText.indexOf('get_label');
+    expect(resolveModuleBindingFile(ctx, offset + 1, bindings)).toBeNull();
+  });
+
+  it('别名写法：`m$xxx` 里点 m（表里 key 是别名）→ 命中', () => {
+    const text = 'x <- m$BaseModel';
+    const ctx = createContext(
+      [
+        { uri: 'test.R', text },
+        { uri: 'model.R', text: 'BaseModel <- R6::R6Class("BaseModel")' },
+      ],
+      'test.R',
+    );
+    // 'm$' 的起点就是 m 这个 token 的起点（m 只有 1 个字符，别再加 1）
+    expect(resolveModuleBindingFile(ctx, text.indexOf('m$'), new Map([['m', 'model.R']]))).toBe(
+      'model.R',
+    );
+  });
+
+  it('点普通变量 y / 表里没有的名字 → 不命中', () => {
+    const ctx = ctxOf();
+    // 第三行 'y <- schema' 里 y 的起点
+    expect(resolveModuleBindingFile(ctx, cursorText.indexOf('y <-'), bindings)).toBeNull();
+  });
+
+  it('光标不在标识符上（点在 `)` 上）→ 不命中', () => {
+    const ctx = ctxOf();
+    expect(resolveModuleBindingFile(ctx, cursorText.indexOf(')\n'), bindings)).toBeNull();
+  });
+});
+
+describe('resolveAttachNameDefinition 附着清单引入的名字 → 模块里的定义', () => {
+  // 模块文件：一个类 + 一个函数 + 一个常量（三种类型都要能跳）
+  const moduleText = [
+    'FieldInfo <- R6::R6Class("FieldInfo")', // 第 0 行
+    'get_label <- function(x) x', // 第 1 行
+    'SCHEMA <- list()', // 第 2 行
+  ].join('\n');
+
+  /** 附着名表：正常接线时由 provider 从 BoxImport.attach 建好传入 */
+  function attachTable(): Map<string, AttachNameTarget> {
+    return new Map([
+      ['FieldInfo', { moduleUri: 'field_info.R', source: 'FieldInfo' }], // [FieldInfo] 两侧同名
+      ['FI', { moduleUri: 'field_info.R', source: 'FieldInfo' }], // [FI = FieldInfo] 重命名
+      ['get_label', { moduleUri: 'field_info.R', source: 'get_label' }], // [get_label] 函数
+      ['SCHEMA', { moduleUri: 'field_info.R', source: 'SCHEMA' }], // [SCHEMA] 变量
+    ]);
+  }
+
+  function ctxOf(cursorText: string, withModule = true): AnalysisContext {
+    const files = [{ uri: 'test.R', text: cursorText }];
+    if (withModule) {
+      files.push({ uri: 'field_info.R', text: moduleText });
+    }
+    return createContext(files, 'test.R');
+  }
+
+  it('两侧同名（[FieldInfo]）→ 跳模块里的 FieldInfo（第 0 行）', () => {
+    const text = 'x <- FieldInfo$new()';
+    const site = resolveAttachNameDefinition(ctxOf(text), text.indexOf('FieldInfo') + 1, attachTable());
+    expect(site?.uri).toBe('field_info.R');
+    expect(site?.line).toBe(0);
+    expect(site?.name).toBe('FieldInfo');
+  });
+
+  it('重命名（[FI = FieldInfo]）→ 用 source 去模块里找 FieldInfo', () => {
+    const text = 'x <- FI$new()';
+    const site = resolveAttachNameDefinition(ctxOf(text), text.indexOf('FI') + 1, attachTable());
+    expect(site?.uri).toBe('field_info.R');
+    expect(site?.line).toBe(0);
+    expect(site?.name).toBe('FieldInfo'); // 跳到的名字是模块内那个
+  });
+
+  it('函数名与变量名一样支持（不分类型）', () => {
+    const fnText = 'y <- get_label(1)';
+    const fnSite = resolveAttachNameDefinition(
+      ctxOf(fnText),
+      fnText.indexOf('get_label') + 1,
+      attachTable(),
+    );
+    expect(fnSite?.line).toBe(1);
+
+    const valText = 'z <- SCHEMA';
+    const valSite = resolveAttachNameDefinition(
+      ctxOf(valText),
+      valText.indexOf('SCHEMA') + 1,
+      attachTable(),
+    );
+    expect(valSite?.line).toBe(2);
+  });
+
+  it('`p$FieldInfo` 形状 → 不命中（那是成员访问，不是附着进来的裸名字）', () => {
+    const text = 'x <- p$FieldInfo';
+    expect(resolveAttachNameDefinition(ctxOf(text), text.indexOf('FieldInfo') + 1, attachTable())).toBeNull();
+  });
+
+  it('不在附着表里的名字 → 不命中', () => {
+    const text = 'x <- something_else';
+    expect(
+      resolveAttachNameDefinition(ctxOf(text), text.indexOf('something_else') + 1, attachTable()),
+    ).toBeNull();
+  });
+
+  it('模块文件没加载 → 不命中', () => {
+    const text = 'x <- FI$new()';
+    const ctx = ctxOf(text, false); // 只加载当前文件
+    expect(resolveAttachNameDefinition(ctx, text.indexOf('FI') + 1, attachTable())).toBeNull();
+  });
+
+  it('模块里没有那个顶层名字（例如它是函数体里的局部变量）→ 不命中', () => {
+    const text = 'x <- FI$new()';
+    const table = new Map([['FI', { moduleUri: 'field_info.R', source: 'not_defined_at_top' }]]);
+    expect(resolveAttachNameDefinition(ctxOf(text), text.indexOf('FI') + 1, table)).toBeNull();
+  });
+
+  it('光标不在任何标识符上 → 不命中', () => {
+    const text = 'x <- FI$new()';
+    expect(resolveAttachNameDefinition(ctxOf(text), 1, attachTable())).toBeNull(); // 偏移 1 是空格
   });
 });

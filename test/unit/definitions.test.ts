@@ -203,6 +203,53 @@ describe('resolveVariableDefinition 变量跳转（点变量 → 赋值行）', 
     // 光标在数字 1 上（不是 identifier）
     expect(resolveVariableDefinition(ctx, text.indexOf('1'))).toBeNull();
   });
+
+  // 顶层 `=` 与 `<-` 在 R 里等价，但 bindings 只记 `<-` —— 下面几条走 symbols 兜底
+  it('顶层用 `=` 赋值的常量 → 兜底命中', () => {
+    const text = 'config = list(a = 1)\nx <- config';
+    const ctx = singleCtx(text);
+    const cursor = text.indexOf('x <- config') + 'x <- '.length;
+    expect(resolveVariableDefinition(ctx, cursor)).toEqual({
+      name: 'config',
+      uri: 'test.R',
+      line: 0,
+      character: 0,
+    });
+  });
+
+  it('顶层用 `=` 赋值的函数 → 兜底命中（括号里的具名参数 `=` 不算赋值）', () => {
+    const text = 'helper = function(x, y = 2) x\nz <- helper(1)';
+    const ctx = singleCtx(text);
+    const cursor = text.indexOf('z <- helper') + 'z <- '.length;
+    expect(resolveVariableDefinition(ctx, cursor)).toEqual({
+      name: 'helper',
+      uri: 'test.R',
+      line: 0,
+      character: 0,
+    });
+    // `y = 2` 在括号里（深度 > 0）→ 不是顶层赋值，点 y 不跳
+    expect(resolveVariableDefinition(ctx, text.indexOf('y = 2'))).toBeNull();
+  });
+
+  it('同名多次顶层 `=` 赋值 → 取**光标前最后一次**（与 bindings 语义一致）', () => {
+    const text = 'dup = 1\ndup = 2\nx <- dup';
+    const ctx = singleCtx(text);
+    const cursor = text.indexOf('x <- dup') + 'x <- '.length;
+    expect(resolveVariableDefinition(ctx, cursor)?.line).toBe(1); // 第二次赋值所在行
+  });
+
+  it('顶层 `=` 赋值但在**光标之后** → null（兜底也只看光标之前）', () => {
+    const text = 'x <- config\nconfig = list(a = 1)';
+    const ctx = singleCtx(text);
+    // 光标在第 0 行的 config 上，此时它还没赋值
+    expect(resolveVariableDefinition(ctx, text.indexOf('config'))).toBeNull();
+  });
+
+  it('既没有 `<-` 也没有顶层 `=` 的名字 → null', () => {
+    const text = 'x <- something_undefined';
+    const ctx = singleCtx(text);
+    expect(resolveVariableDefinition(ctx, text.indexOf('something_undefined'))).toBeNull();
+  });
 });
 
 describe('definitionSiteAt 把偏移量组装成跳转结果', () => {
