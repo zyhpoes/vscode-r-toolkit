@@ -54,7 +54,7 @@ export class R6DefinitionProvider implements vscode.DefinitionProvider {
     const uri = document.uri.toString();
     const text = document.getText();
 
-    // 光标文件切一次词：解析导入、建 ctx 都用这一份（全项目只有这里与 parseSourceFile 切词）
+    // 光标文件切一次词：解析导入、建 ctx 都用这一份（切 R 源文件只有这里与 parseSourceFile）
     const cursorTokens = tokenize(text);
 
     // box 导入 + 候选根：模块跳转与"加载依赖文件"共用（各只算一次）
@@ -99,34 +99,24 @@ export class R6DefinitionProvider implements vscode.DefinitionProvider {
     // 再试模块成员跳转：`schema$get_table_label` 里的 get_table_label →
     // 模块文件里的同名顶层符号（不看 `#' @export`，见 docs/box-模块规则.md）
     const moduleMember = resolveModuleMemberDefinition(ctx, cursorOffset, boxModules.urisByName);
-    if (moduleMember !== null) {
-      return this.returnSite('模块成员', moduleMember);
-    }
+    if (moduleMember !== null) return this.returnSite('模块成员', moduleMember);
 
     // 再试成员跳转（self$xxx / private$xxx / 类名$xxx 的成员部分）
     const memberDef = resolveMemberDefinition(ctx, cursorOffset);
-    if (memberDef !== null) {
-      return this.returnSite('成员', memberDef);
-    }
+    if (memberDef !== null) return this.returnSite('成员', memberDef);
 
     // 再试类名跳转（类名本身）
     const classDef = resolveClassDefinition(ctx, cursorOffset);
-    if (classDef !== null) {
-      return this.returnSite('类名', classDef);
-    }
+    if (classDef !== null) return this.returnSite('类名', classDef);
 
     // 再试变量跳转（普通变量 → 它的赋值行；类名已在上一步命中，到不了这里）
     const varDef = resolveVariableDefinition(ctx, cursorOffset);
-    if (varDef !== null) {
-      return this.returnSite('变量', varDef);
-    }
+    if (varDef !== null) return this.returnSite('变量', varDef);
 
     // 最后兜底：附着清单引入的名字（`[FieldInfo]`、`[FI = FieldInfo]` 的 FI、`[get_label]`）
     // 放最后是因为 R 里后写的赋值会覆盖导入进来的绑定 —— 本地优先、附着兜底
     const attachName = resolveAttachNameDefinition(ctx, cursorOffset, boxModules.attachByName);
-    if (attachName !== null) {
-      return this.returnSite('附着名', attachName);
-    }
+    if (attachName !== null) return this.returnSite('附着名', attachName);
 
     // 都不是 → null（编辑器显示"未找到定义"）
     this.output.appendLine(`[def] 未命中（${describePosition(document, cursorOffset)}）`);
@@ -175,14 +165,10 @@ function locateModuleFile(
   rootDirs: string[],
 ): string | null {
   const tokenIndex = findTokenIndexAt(ctx, cursorOffset);
-  if (tokenIndex === -1) {
-    return null;
-  }
+  if (tokenIndex === -1) return null;
 
   const hit = segmentAtOffset(imports, ctx.cursorFile.tokens[tokenIndex].offset);
-  if (hit === undefined) {
-    return null;
-  }
+  if (hit === undefined) return null;
 
   return resolveImportFilePath(document, hit.imp, hit.segmentIndex, rootDirs) ?? null;
 }
@@ -237,7 +223,7 @@ async function loadBoxModules(
 
       // 附着清单：每个本地名都指向"这个模块文件 + 模块内那个名字"
       // （同名写法 `[a]` 的 source 也是 a；重命名 `[g = f]` 才需要 source 区分）
-      for (const attachName of imp.attach?.names ?? []) {
+      for (const attachName of imp.attach ?? []) {
         attachByName.set(attachName.alias, { moduleUri: depUri, source: attachName.source });
       }
     } catch (error) {

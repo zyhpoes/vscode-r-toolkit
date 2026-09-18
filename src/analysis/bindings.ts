@@ -12,13 +12,13 @@ import type { Token } from '../parser/tokenizer';
 /** 一条赋值记录（只记录位置，不判断右侧是什么） */
 export interface Binding {
   varName: string; // 被赋值的变量名（赋值左侧）
-  stIndex: number; // 右侧第一个 token 的下标（供求值器/别名递归定位右边用）
-  offset: number; // varName 的位置（用于"最近赋值"判断）
+  stIndex: number; // token 坐标：右侧第一个 token 的下标（求值器走访右边表达式用）
+  offset: number; // 字符坐标：变量名在原文里的字符偏移（光标比较 / 跳转目标用）
 }
 
 /**
  * 从**已有 token** 里扫描所有赋值（一次性、不递归），按代码顺序返回。
- * 切词由调用方负责（provider 切光标文件、parseSourceFile 切依赖文件，全项目只有这两处切词）。
+ * 切词由调用方负责（provider 切光标文件、parseSourceFile 切依赖文件）。
  */
 export function parseBindings(tokens: Token[]): Binding[] {
   const bindings: Binding[] = [];
@@ -26,19 +26,13 @@ export function parseBindings(tokens: Token[]): Binding[] {
   for (let i = 0; i < tokens.length; i++) {
     const t = tokens[i];
     // 只找赋值运算符 <-（不考虑 =）
-    if (t.kind !== 'operator' || t.text !== '<-') {
-      continue;
-    }
+    if (t.kind !== 'operator' || t.text !== '<-') continue;
 
     // 左边必须是"独立变量"：前一个 token 是标识符，
     // 且再前一个不是 '$'（排除 self$x <- 这类成员赋值）
     const lhs = tokens[i - 1];
-    if (lhs?.kind !== 'identifier') {
-      continue;
-    }
-    if (tokens[i - 2]?.text === '$') {
-      continue;
-    }
+    if (lhs?.kind !== 'identifier') continue;
+    if (tokens[i - 2]?.text === '$') continue;
 
     bindings.push({ varName: lhs.text, stIndex: i + 1, offset: lhs.offset });
   }
@@ -62,9 +56,7 @@ export function findLatestBinding(
 ): Binding | undefined {
   for (let i = bindings.length - 1; i >= 0; i--) {
     const b = bindings[i];
-    if (b.varName === varName && b.offset <= cursorOffset) {
-      return b;
-    }
+    if (b.varName === varName && b.offset <= cursorOffset) return b;
   }
   return undefined;
 }

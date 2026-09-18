@@ -20,9 +20,7 @@ function parsedFiles(files: SourceFile[]): ParsedSourceFile[] {
 function nodeOf(parsed: ParsedSourceFile[], className: string): ClassWithFile {
   for (const entry of parsed) {
     const classDef = entry.classes.find((c) => c.name === className);
-    if (classDef !== undefined) {
-      return { parsed: entry, classDef };
-    }
+    if (classDef !== undefined) return { parsed: entry, classDef };
   }
   throw new Error(`测试夹具里找不到类 ${className}`);
 }

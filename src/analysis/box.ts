@@ -8,8 +8,7 @@
 
 import { type Token } from '../parser/tokenizer';
 import { matchBracket } from '../parser/brackets';
-import { nextNonComment, nextNonCommentIndex } from '../parser/token-utils';
-import { splitTopLevel } from '../parser/r6-parser';
+import { nextNonComment, nextNonCommentIndex, splitTopLevel } from '../parser/utils';
 
 /** 模块路径的基准：从哪找模块文件 */
 export type BoxRelative = 'root' | 'file';
@@ -30,17 +29,6 @@ export interface BoxAttachName {
   source: string;
 }
 
-/** 附着清单 `[...]`：把模块里的某些名字直接引进当前作用域（不需要 `模块$` 前缀） */
-export interface BoxAttach {
-  /**
-   * 明确列出的名字：`[a, b]` → a/a、b/b；`[g = f]` → 别名 g、模块内名 f。
-   * 跳转时用 alias 找"这名字哪来的"，到模块文件里找定义时用 source。
-   */
-  names: BoxAttachName[];
-  /** 含 `...`（附着模块的全部导出名）；具体名字静态未知，所以只记这个事实 */
-  all: boolean;
-}
-
 /** 一条 box 导入 */
 export interface BoxImport {
   /** 路径分段（`R/schema/schema` → 三段；引号写法整串算一段）；`[附着清单]` 不算在内 */
@@ -49,8 +37,11 @@ export interface BoxImport {
   relative: BoxRelative;
   /** 别名（`m = R/model/base` 里的 m）；没写别名 → undefined */
   alias: string | undefined;
-  /** 附着清单；没写 `[...]` → undefined */
-  attach: BoxAttach | undefined;
+  /**
+   * 附着清单里的名字（`[a, b]` / `[g = f]`）；**没写清单 → undefined**。
+   * 这个 undefined 有语义：写了清单（哪怕空清单）就不绑模块名，见 moduleBindingName。
+   */
+  attach: BoxAttachName[] | undefined;
   /** box 关键字的位置 */
   offset: number;
 }
@@ -67,9 +58,7 @@ export function modulePathOf(imp: BoxImport): string {
  * @returns 模块绑定名；不绑模块名（附着写法）→ undefined
  */
 export function moduleBindingName(imp: BoxImport): string | undefined {
-  if (imp.attach !== undefined) {
-    return undefined;
-  }
+  if (imp.attach !== undefined) return undefined;
   return imp.alias ?? imp.segments[imp.segments.length - 1]?.name;
 }
 
@@ -88,25 +77,21 @@ export function segmentAtOffset(
 ): { imp: BoxImport; segmentIndex: number } | undefined {
   for (const imp of imports) {
     const segmentIndex = imp.segments.findIndex((segment) => segment.offset === offset);
-    if (segmentIndex !== -1) {
-      return { imp, segmentIndex };
-    }
+    if (segmentIndex !== -1) return { imp, segmentIndex };
   }
   return undefined;
 }
 
 /**
  * 从**已有 token** 里解析所有 box::use 导入（按出现顺序）。
- * 切词由调用方负责（provider 切光标文件、parseSourceFile 切依赖文件，全项目只有这两处切词）。
+ * 切词由调用方负责（provider 切光标文件、parseSourceFile 切依赖文件）。
  */
 export function parseBoxImports(tokens: Token[]): BoxImport[] {
   const result: BoxImport[] = [];
 
   for (let i = 0; i < tokens.length; i++) {
     // 找 `box :: use (` 模式
-    if (!isBoxUseStart(tokens, i)) {
-      continue;
-    }
+    if (!isBoxUseStart(tokens, i)) continue;
 
     // use 的 '(' 下标 = i + 3（box :: use (）
     const openIndex = i + 3;
@@ -117,9 +102,8 @@ export function parseBoxImports(tokens: Token[]): BoxImport[] {
 
     // 找配对的 ')'（复用 parser 的括号工具：数同类括号深度，没配对返回 -1）
     const closeIndex = matchBracket(tokens, openIndex, '(');
-    if (closeIndex === -1) {
-      continue; // 括号没配对（代码不完整），跳过
-    }
+    // 括号没配对（代码不完整），跳过
+    if (closeIndex === -1) continue;
 
     // 括号内按顶层逗号切成模块段，逐段解析
     const segments = splitTopLevel(tokens, openIndex, closeIndex);
@@ -154,9 +138,7 @@ function parseSegment(tokens: Token[], stSegment: number, boxOffset: number): Bo
   const stPath = alias === undefined ? stSegment : stSegment + 2;
 
   const path = readModulePath(tokens, stPath);
-  if (path === null) {
-    return null;
-  }
+  if (path === null) return null;
 
   // 从路径停下的位置接着读附着清单（每段 token 只读一次，不重复扫描）
   const attach = readAttachList(tokens, path.enIndex);
@@ -191,9 +173,7 @@ function readModulePath(
   stPath: number,
 ): { segments: ModuleSegment[]; relative: BoxRelative; enIndex: number } | null {
   const first = tokens[stPath];
-  if (first === undefined) {
-    return null;
-  }
+  if (first === undefined) return null;
 
   // 带引号写法："person/utils/x" 是一个 string token，内容直接就是完整路径（整串算一段）
   if (first.kind === 'string') {
@@ -202,50 +182,39 @@ function readModulePath(
     // box 运行时会报错），这里剥掉字符串里误带的 [导出]，避免路径带上脏内容找错文件。
     const bracketIdx = first.text.indexOf('[');
     const name = bracketIdx === -1 ? first.text : first.text.slice(0, bracketIdx);
-    if (name === '') {
-      return null;
-    }
+    if (name === '') return null;
     // 引号后面一个 token 就是路径之外（可能是 `[`）
     return { segments: [{ name, offset: first.offset }], relative: 'root', enIndex: stPath + 1 };
   }
 
   // 不带引号：路径起点必须是标识符（person、proj；./ 的 . 和 ../ 的 .. 也是标识符）
-  if (first.kind !== 'identifier') {
-    return null;
-  }
+  if (first.kind !== 'identifier') return null;
 
   // 收路径分段：只认标识符（段名）与 '/'（层级分隔），遇到其他 token 就结束
   const segments: ModuleSegment[] = [];
   let j = stPath;
   for (; j < tokens.length; j++) {
     const t = tokens[j];
-    if (t.kind === 'operator' && t.text === '[') {
-      break; // 开始附着清单 → 路径结束
-    }
+    // 开始附着清单 → 路径结束
+    if (t.kind === 'operator' && t.text === '[') break;
     if (t.kind === 'identifier') {
       segments.push({ name: t.text, offset: t.offset });
       continue;
     }
-    if (t.kind === 'operator' && t.text === '/') {
-      continue;
-    }
+    if (t.kind === 'operator' && t.text === '/') continue;
     break; // 其他 token（, ) 等）→ 路径结束
   }
   // 停在哪个 token：终止符本身，或数组末尾（越界）
   const enIndex = j;
 
-  if (segments.length === 0) {
-    return null;
-  }
+  if (segments.length === 0) return null;
 
   // './x'：前导的 '.' 只是"相对当前文件"的标记，不是路径段 → 去掉
   const stIsDot = segments[0].name === '.';
   if (stIsDot) {
     segments.shift();
   }
-  if (segments.length === 0) {
-    return null;
-  }
+  if (segments.length === 0) return null;
 
   // 基准：'./' 或 '../' 开头 → 相对当前文件目录；其余 → 候选根
   const relative: BoxRelative = stIsDot || segments[0].name === '..' ? 'file' : 'root';
@@ -255,40 +224,33 @@ function readModulePath(
 /**
  * 读附着清单：openIndex 处若是 `[`，解析里面的名字。
  * `[a, b]` → 两个名字（别名与模块内名同名）；`[g = f]` → 别名 g、模块内名 f；
- * `[...]` → all = true。没有清单 / `[` 没配对 → undefined。
+ * `[...]` → 跳过（它不是名字；本插件不提供这类名字的跳转，见 docs/box-模块规则.md）。
+ * 没有清单 / `[` 没配对 → undefined。
  * @param openIndex 期望是 `[` 的下标；调用方给的是"路径读完停下的位置"，
  *                  可能是 `)` / `,` / 越界，所以函数自己要先校验一次
  */
-function readAttachList(tokens: Token[], openIndex: number): BoxAttach | undefined {
+function readAttachList(tokens: Token[], openIndex: number): BoxAttachName[] | undefined {
   const openToken = tokens[openIndex];
-  if (openToken?.kind !== 'operator' || openToken.text !== '[') {
-    return undefined;
-  }
+  if (openToken?.kind !== 'operator' || openToken.text !== '[') return undefined;
 
   const closeIndex = matchBracket(tokens, openIndex, '[');
-  if (closeIndex === -1) {
-    return undefined; // 括号没配对（代码不完整）→ 不当有清单
-  }
+  // 括号没配对（代码不完整）→ 不当有清单
+  if (closeIndex === -1) return undefined;
 
   const names: BoxAttachName[] = [];
-  let all = false;
   for (const [stItemIndex, enItemIndex] of splitTopLevel(tokens, openIndex, closeIndex)) {
     const aliasIndex = nextNonCommentIndex(tokens, stItemIndex);
-    if (aliasIndex === undefined) {
-      continue; // 空块（`[a,]` 的尾块）或整块只有注释
-    }
+    // 空块（`[a,]` 的尾块）或整块只有注释
+    if (aliasIndex === undefined) continue;
     const aliasToken = tokens[aliasIndex];
-    if (aliasToken.kind !== 'identifier') {
-      continue; // `[1]`、`["a"]` 这类认不出来的写法：宁可漏记，也不乱记
-    }
-    if (aliasToken.text === '...') {
-      all = true; // 附着全部导出名（具体名字静态未知）
-      continue;
-    }
+    // `[1]`、`["a"]` 这类认不出来的写法：宁可漏记，也不乱记
+    if (aliasToken.kind !== 'identifier') continue;
+    // `...`（附着全部）不是名字：跳过，不能塞进 names（否则上层会以为是"一个叫 ... 的符号"）
+    if (aliasToken.text === '...') continue;
     names.push({ alias: aliasToken.text, source: readAttachSource(tokens, aliasIndex, enItemIndex) });
   }
 
-  return { names, all };
+  return names;
 }
 
 /**
@@ -300,9 +262,7 @@ function readAttachSource(tokens: Token[], aliasIndex: number, enItemIndex: numb
   const aliasToken = tokens[aliasIndex];
   for (let j = aliasIndex + 1; j < enItemIndex; j++) {
     const t = tokens[j];
-    if (t.kind !== 'operator' || t.text !== '=') {
-      continue;
-    }
+    if (t.kind !== 'operator' || t.text !== '=') continue;
     // 右侧写了名字就用它；没写 / 写坏了（`[g = ]`、`[g = "f"]`）→ 退回别名，两侧同名
     const source = nextNonComment(tokens, j + 1);
     return source?.kind === 'identifier' ? source.text : aliasToken.text;

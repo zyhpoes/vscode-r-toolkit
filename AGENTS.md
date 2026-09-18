@@ -27,6 +27,10 @@
 ## 2. 代码风格
 
 - 小函数、显式类型、禁止 `any`、错误处理明确
+- **花括号**：单语句守卫（`continue` / `break` / `return` / `throw`）写成**同一行** —— `if (x) continue;`。
+  条件较长（连缩进超过 100 字符）、块内有多条语句或带注释时，仍用带花括号的多行写法。
+  `eslint.config.mjs` 里用 `curly: ['error', 'multi-line']` 兜住"无花括号 + 换行体"那种危险形状
+  （Apple "goto fail" 的形状），同时放行同一行的单语句守卫
 - 导入：Node 内置模块（`path` / `fs` 等）与 `vscode` 统一用**命名空间导入**（`import * as path from 'path'`），调用处带前缀（`path.dirname(...)`）—— 与 VS Code 官方示例一致，也让"这是外部能力"一眼可见（避免与我们自己的 `resolve*` / `join` 等函数混淆）。被它占用的名字（如 `path`）不要再当参数名，改用 `ptr`
 - 代码注释：不要使用 1、2、3、4 等编号步骤（开发中可能在中间插入新步骤，编号会乱）；用描述性文字表达
 - 生成的文件带简洁中文注解（严格 JSON 如 `package.json` 除外），以"帮用户看懂"为度，不堆砌
@@ -53,14 +57,14 @@
 
 | 术语 | 在项目里的固定含义 | 相关位置 |
 |---|---|---|
-| binding | **一行赋值**：记录"哪个变量、在哪个位置被 `<-` 赋值、右侧从哪个 token 开始"，不判断右侧类型 | `analysis/bindings.ts`、`ctx.bindings` |
+| binding | **一行赋值**：记录"哪个变量、在哪个位置被 `<-` 赋值、右侧从哪个 token 开始"，不判断右侧类型 | `analysis/bindings.ts`、`ctx.cursorFile.bindings` |
 | token | 词法单元：词法器切出的最小单位（名字 / 字符串 / 数字 / 运算符 / 注释） | `parser/tokenizer.ts` |
 | scope（区） | R6 成员所属的区：public / private / active | `parser/r6-parser.ts` |
 | member（成员） | 类里的一个成员：方法或字段 | 同上 |
 | 合成成员（synthetic） | R6 自动生成、非用户手写的成员，目前只有 `new` | 同上 |
 | inherit | `inherit = X` 的父类引用；沿父类一层层往上找的过程叫"继承链" | `analysis/inheritance.ts` |
-| parsed | "已解析过的文件" = 文件文本 + 该文件解析出的类清单 | `analysis/source-file.ts` |
-| cursorParsed | 光标所在文件的解析结果 | `analysis/context.ts` |
+| parsed | "已解析过的文件" = 文件文本 + 该文件的**全部**解析产物（tokens / lines / classes / symbols / bindings） | `analysis/source-file.ts` |
+| cursorFile | 光标所在文件的解析结果（`parsed` 里 uri 匹配的那项） | `analysis/context.ts` |
 | DefinitionSite | 一次跳转命中的结果：命中的名字 + 目标文件 + 行列 | `analysis/definitions.ts` |
 | word | 光标下的那个标识符（token） | 各查询函数 |
 | hit | 查询命中（找到了） | 同上 |

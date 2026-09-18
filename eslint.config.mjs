@@ -50,6 +50,9 @@ export default defineConfig([
       '@typescript-eslint/consistent-type-imports': ['error', { prefer: 'type-imports' }],
       // 未使用变量报错；`_` 开头豁免（占位参数约定）
       '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_', varsIgnorePattern: '^_' }],
+      // 花括号：禁止"无花括号 + 换行体"（Apple "goto fail" 那种危险形状），
+      // 但放行**同一行**的单语句守卫（`if (x) continue;`）—— 本项目采用后者（见 AGENTS.md 代码风格）
+      curly: ['error', 'multi-line'],
       // 对我们过严，关闭
       '@typescript-eslint/restrict-template-expressions': 'off',
       // 生产代码禁 console.log；warn/error 允许

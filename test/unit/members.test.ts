@@ -7,9 +7,7 @@ import { TextLines } from '../../src/utils/text';
 // 辅助：文本里定位成员定义名（如 "greet = function" 只命中定义处）的行列
 function defPos(text: string, needle: string): { line: number; character: number } {
   const at = text.indexOf(needle);
-  if (at === -1) {
-    throw new Error(`测试文本里找不到 ${needle}`);
-  }
+  if (at === -1) throw new Error(`测试文本里找不到 ${needle}`);
   return new TextLines(text).positionAt(at);
 }
 
@@ -17,9 +15,7 @@ function defPos(text: string, needle: string): { line: number; character: number
 function defPosSecond(text: string, needle: string): { line: number; character: number } {
   const first = text.indexOf(needle);
   const at = text.indexOf(needle, first + 1);
-  if (at === -1) {
-    throw new Error(`测试文本里找不到第 2 个 ${needle}`);
-  }
+  if (at === -1) throw new Error(`测试文本里找不到第 2 个 ${needle}`);
   return new TextLines(text).positionAt(at);
 }
 

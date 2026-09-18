@@ -206,92 +206,77 @@ describe('附着清单 [a, b] / [g = f] 与"不绑模块名"', () => {
     const [imp] = parseBoxImports(tokenize('box::use(R/model/base[BaseModel])'));
     expect(imp.segments.map((s) => s.name)).toEqual(['R', 'model', 'base']);
     // 只写一个名字 → 本地名与模块内名相同
-    expect(imp.attach).toEqual({ names: [{ alias: 'BaseModel', source: 'BaseModel' }], all: false });
+    expect(imp.attach).toEqual([{ alias: 'BaseModel', source: 'BaseModel' }]);
     // 关键：R 里没有 base 这个绑定，所以模块绑定名应为 undefined
     expect(moduleBindingName(imp)).toBeUndefined();
   });
 
   it('多名附着：box::use(person[Person, helper]) → names 两个，保序', () => {
     const [imp] = parseBoxImports(tokenize('box::use(person[Person, helper])'));
-    expect(imp.attach).toEqual({
-      names: [
-        { alias: 'Person', source: 'Person' },
-        { alias: 'helper', source: 'helper' },
-      ],
-      all: false,
-    });
+    expect(imp.attach).toEqual([
+      { alias: 'Person', source: 'Person' },
+      { alias: 'helper', source: 'helper' },
+    ]);
   });
 
   it('重命名附着：box::use(pkg[g = f]) → 本地名 g、模块内名 f', () => {
     const [imp] = parseBoxImports(tokenize('box::use(pkg[g = f])'));
-    expect(imp.attach).toEqual({ names: [{ alias: 'g', source: 'f' }], all: false });
+    expect(imp.attach).toEqual([{ alias: 'g', source: 'f' }]);
   });
 
   it('重命名附着：box::use(R/schema/field_info[FI = FieldInfo]) → 本地名 FI、模块内名 FieldInfo', () => {
     const [imp] = parseBoxImports(tokenize('box::use(R/schema/field_info[FI = FieldInfo])'));
-    expect(imp.attach).toEqual({
-      names: [{ alias: 'FI', source: 'FieldInfo' }],
-      all: false,
-    });
+    expect(imp.attach).toEqual([{ alias: 'FI', source: 'FieldInfo' }]);
   });
 
-  it('附着全部 [...] → all = true、names 为空，同样不绑模块名', () => {
+  it('附着全部 [...] → 不当名字记（本插件不做这类名字的跳转），但仍不绑模块名', () => {
     const [imp] = parseBoxImports(tokenize('box::use(person[...])'));
-    expect(imp.attach).toEqual({ names: [], all: true });
+    expect(imp.attach).toEqual([]);
     expect(moduleBindingName(imp)).toBeUndefined();
   });
 
-  it('混合：box::use(pkg[g = f, ...]) → 一个重命名 + all true', () => {
+  it('混合：box::use(pkg[g = f, ...]) → 只记下显式列出的那个名字', () => {
     const [imp] = parseBoxImports(tokenize('box::use(pkg[g = f, ...])'));
-    expect(imp.attach).toEqual({ names: [{ alias: 'g', source: 'f' }], all: true });
+    expect(imp.attach).toEqual([{ alias: 'g', source: 'f' }]);
   });
 
   it('别名 + 附着清单：box::use(m = prefix/mod[name1, name2])', () => {
     const [imp] = parseBoxImports(tokenize('box::use(m = prefix/mod[name1, name2])'));
     expect(imp.alias).toBe('m');
     expect(imp.segments.map((s) => s.name)).toEqual(['prefix', 'mod']);
-    expect(imp.attach).toEqual({
-      names: [
-        { alias: 'name1', source: 'name1' },
-        { alias: 'name2', source: 'name2' },
-      ],
-      all: false,
-    });
+    expect(imp.attach).toEqual([
+      { alias: 'name1', source: 'name1' },
+      { alias: 'name2', source: 'name2' },
+    ]);
     expect(moduleBindingName(imp)).toBeUndefined();
   });
 
   it('引号路径 + 清单：box::use("person/utils/x"[Person]) → 路径一段、附着一名', () => {
     const [imp] = parseBoxImports(tokenize('box::use("person/utils/x"[Person])'));
     expect(imp.segments.map((s) => s.name)).toEqual(['person/utils/x']);
-    expect(imp.attach).toEqual({ names: [{ alias: 'Person', source: 'Person' }], all: false });
+    expect(imp.attach).toEqual([{ alias: 'Person', source: 'Person' }]);
   });
 
   it('名单里混着注释：注释不占名字，也不打乱左右对应', () => {
     const text = ['box::use(pkg[', '  # 字段类型', '  FI = FieldInfo,', '  helper,', '])'].join('\n');
     const [imp] = parseBoxImports(tokenize(text));
-    expect(imp.attach).toEqual({
-      names: [
-        { alias: 'FI', source: 'FieldInfo' },
-        { alias: 'helper', source: 'helper' },
-      ],
-      all: false,
-    });
+    expect(imp.attach).toEqual([
+      { alias: 'FI', source: 'FieldInfo' },
+      { alias: 'helper', source: 'helper' },
+    ]);
   });
 
   it('右侧写坏了（box::use(pkg[g = ])）→ 模块内名退回本地名', () => {
     const [imp] = parseBoxImports(tokenize('box::use(pkg[g = ])'));
-    expect(imp.attach).toEqual({ names: [{ alias: 'g', source: 'g' }], all: false });
+    expect(imp.attach).toEqual([{ alias: 'g', source: 'g' }]);
   });
 
   it('本项的 = 不会串到下一项：box::use(pkg[a, g = f])', () => {
     const [imp] = parseBoxImports(tokenize('box::use(pkg[a, g = f])'));
-    expect(imp.attach).toEqual({
-      names: [
-        { alias: 'a', source: 'a' },
-        { alias: 'g', source: 'f' },
-      ],
-      all: false,
-    });
+    expect(imp.attach).toEqual([
+      { alias: 'a', source: 'a' },
+      { alias: 'g', source: 'f' },
+    ]);
   });
 
   it('没有清单 → attach 为 undefined，仍绑模块名', () => {

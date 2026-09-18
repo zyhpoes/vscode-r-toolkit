@@ -9,7 +9,7 @@
  */
 
 import { r6CallTokenRange } from '../parser/r6-parser';
-import { nextNonComment } from '../parser/token-utils';
+import { nextNonComment } from '../parser/utils';
 import type { Token } from '../parser/tokenizer';
 import type { TextLines } from '../utils/text';
 import { findLatestBinding, type Binding } from './bindings';
@@ -75,21 +75,15 @@ function resolveVarTypeDFS(
   depth: number,
 ): ResolvedType {
   // DFS 终止条件一：这个变量已经追过 → 环（如 a <- b; b <- a）→ 追不到
-  if (visited.has(varName)) {
-    return null;
-  }
+  if (visited.has(varName)) return null;
   // DFS 终止条件二：链超长 → 追不到（正常代码远到不了这个深度）
-  if (depth > MAX_TRACE_DEPTH) {
-    return null;
-  }
+  if (depth > MAX_TRACE_DEPTH) return null;
   visited.add(varName);
 
   // 找 varName 在光标前"最近一次"赋值（逻辑在 bindings.ts，与变量跳转共用同一份）
   const binding = findLatestBinding(bindings, varName, cursorOffset);
   // DFS 终止条件三：光标位置前没有这条变量的赋值 → 追不到
-  if (binding === undefined) {
-    return null;
-  }
+  if (binding === undefined) return null;
 
   const stIndex = binding.stIndex; // 右侧第一个 token 的下标
   const first = tokens[stIndex];
@@ -108,12 +102,8 @@ function resolveVarTypeDFS(
     names: resolver,
     cursorOffset,
   });
-  if (evalResult.kind === 'class') {
-    return { kind: 'class', className: evalResult.className };
-  }
-  if (evalResult.kind === 'function') {
-    return { kind: 'function' };
-  }
+  if (evalResult.kind === 'class') return { kind: 'class', className: evalResult.className };
+  if (evalResult.kind === 'function') return { kind: 'function' };
 
   // 本层判断不了（unknown）→ 若右侧是"单个变量名"（p <- q），可能是别名，
   // 沿链 DFS 递归追那个变量（visited/depth 已保证安全）
@@ -134,17 +124,13 @@ function resolveVarTypeDFS(
  */
 function isSingleNameRhs(tokens: Token[], lines: TextLines, stIndex: number): boolean {
   const first = tokens[stIndex];
-  if (first === undefined || first.kind !== 'identifier') {
-    return false;
-  }
+  if (first === undefined || first.kind !== 'identifier') return false;
   // 下一个非注释 token（注释不参与语句结构）
   const next = nextNonComment(tokens, stIndex + 1);
-  if (next === undefined) {
-    return true; // 右边只有这个名字（文件尾）
-  }
-  if (next.text === ';') {
-    return true; // 分号分隔的下一句
-  }
+  // 右边只有这个名字（文件尾）
+  if (next === undefined) return true;
+  // 分号分隔的下一句
+  if (next.text === ';') return true;
   // 换行了 → 本句到此结束（即使下一行还有代码）
   return lines.positionAt(next.offset).line !== lines.positionAt(first.offset).line;
 }

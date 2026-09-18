@@ -135,9 +135,7 @@ function operatorLength(text: string, i: number): number {
   const rest = text.slice(i);
 
   // 三字符运算符（含命名空间 :: 的第三冒号）
-  if (rest.startsWith('<<-') || rest.startsWith('->>') || rest.startsWith(':::')) {
-    return 3;
-  }
+  if (rest.startsWith('<<-') || rest.startsWith('->>') || rest.startsWith(':::')) return 3;
 
   // 两字符运算符
   if (
@@ -157,9 +155,7 @@ function operatorLength(text: string, i: number): number {
   // %...% 自定义中缀运算符（如 %>%、%in%、%>%）
   if (rest.startsWith('%')) {
     const end = rest.indexOf('%', 1);
-    if (end > 1) {
-      return end + 1;
-    }
+    if (end > 1) return end + 1;
   }
 
   // 默认：单字符（$、(、)、{、}、, 等）

@@ -57,14 +57,10 @@ export type RhsType =
 export function evaluateRhs(tokens: Token[], stRhs: number, env: EvalEnv): RhsType {
   const first = tokens[stRhs];
   // 右边漏写（p <- 后面没内容，代码不完整）→ unknown
-  if (first === undefined) {
-    return { kind: 'unknown' };
-  }
+  if (first === undefined) return { kind: 'unknown' };
 
   // 函数定义：func <- function(...)
-  if (first.kind === 'identifier' && first.text === 'function') {
-    return { kind: 'function' };
-  }
+  if (first.kind === 'identifier' && first.text === 'function') return { kind: 'function' };
 
   // 单个标识符或 $ 链开头（Person / person$Person / Person$new()）
   if (first.kind === 'identifier') {
@@ -73,12 +69,8 @@ export function evaluateRhs(tokens: Token[], stRhs: number, env: EvalEnv): RhsTy
       return evaluateDollarChain(tokens, stRhs, env);
     }
     // 单名字：先查是不是类，再查是不是函数，都不是 → unknown
-    if (env.names.isClass(first.text)) {
-      return { kind: 'class', className: first.text };
-    }
-    if (env.names.isFunction(first.text)) {
-      return { kind: 'function' };
-    }
+    if (env.names.isClass(first.text)) return { kind: 'class', className: first.text };
+    if (env.names.isFunction(first.text)) return { kind: 'function' };
     return { kind: 'unknown' };
   }
 
@@ -115,8 +107,6 @@ function evaluateDollarChain(tokens: Token[], stChain: number, env: EvalEnv): Rh
     newNameIdx > 0 ? chainNames[newNameIdx - 1] : chainNames[chainNames.length - 1];
 
   // 类名必须是"真类"才返回 class，否则 unknown
-  if (env.names.isClass(className)) {
-    return { kind: 'class', className };
-  }
+  if (env.names.isClass(className)) return { kind: 'class', className };
   return { kind: 'unknown' };
 }

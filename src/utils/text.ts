@@ -57,9 +57,7 @@ export class TextLines {
 
   /** 某行的结束偏移量（不含换行符；最后一行即文本末尾） */
   private lineEndOffset(lineIndex: number): number {
-    if (lineIndex === this.starts.length - 1) {
-      return this.text.length;
-    }
+    if (lineIndex === this.starts.length - 1) return this.text.length;
     let end = this.starts[lineIndex + 1];
     if (end > 0 && this.text[end - 1] === '\n') {
       end -= 1; // 去掉 \n（可能是 \r\n 的 \n）

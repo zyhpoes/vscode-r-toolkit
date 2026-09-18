@@ -32,8 +32,6 @@ export function findTokenIndexAt(ctx: AnalysisContext, cursorOffset: number): nu
  */
 export function findWordIndexAt(ctx: AnalysisContext, cursorOffset: number): number {
   const index = findTokenIndexAt(ctx, cursorOffset);
-  if (index === -1) {
-    return -1;
-  }
+  if (index === -1) return -1;
   return ctx.cursorFile.tokens[index].kind === 'identifier' ? index : -1;
 }

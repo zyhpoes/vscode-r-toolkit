@@ -63,9 +63,7 @@ function buildClassNode(classDef: R6ClassDef, tokens: Token[]): OutlineNode {
 /** 一个区 → 区节点；该区没有成员时返回 undefined（不生成空节点） */
 function buildScopeNode(classDef: R6ClassDef, scope: R6Scope, tokens: Token[]): OutlineNode | undefined {
   const members = classDef.members.filter((m) => m.scope === scope);
-  if (members.length === 0) {
-    return undefined;
-  }
+  if (members.length === 0) return undefined;
 
   const enMember = members[members.length - 1];
   const enMemberEnd = enMember.nameOffset + enMember.name.length;
@@ -111,18 +109,14 @@ function findScopeKeywordOffset(
 ): number | undefined {
   for (let i = classDef.stIndex; i <= classDef.enIndex; i++) {
     const t = tokens[i];
-    if (t?.kind !== 'identifier' || t.text !== scope) {
-      continue;
-    }
+    if (t?.kind !== 'identifier' || t.text !== scope) continue;
     const isAssignment = tokens[i + 1]?.kind === 'operator' && tokens[i + 1].text === '=';
     const isListCall =
       tokens[i + 2]?.kind === 'identifier' &&
       tokens[i + 2].text === 'list' &&
       tokens[i + 3]?.kind === 'operator' &&
       tokens[i + 3].text === '(';
-    if (isAssignment && isListCall) {
-      return t.offset;
-    }
+    if (isAssignment && isListCall) return t.offset;
   }
   return undefined;
 }
@@ -133,8 +127,6 @@ function findScopeKeywordOffset(
  */
 function r6CallEndOffset(classDef: R6ClassDef, tokens: Token[]): number {
   const closeToken = tokens[classDef.enIndex];
-  if (closeToken === undefined) {
-    return classDef.nameOffset;
-  }
+  if (closeToken === undefined) return classDef.nameOffset;
   return closeToken.offset + closeToken.text.length;
 }

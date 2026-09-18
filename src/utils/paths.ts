@@ -32,11 +32,9 @@ export function isAbsoluteLike(ptr: string): boolean {
  * @returns 去掉末尾斜杠的路径；盘根与无末尾斜杠的输入原样返回
  */
 export function stripTrailingSep(ptr: string): string {
-  if (/^\/+$/.test(ptr)) {
-    return '/'; // 全是斜杠 → 归一成根
-  }
-  if (/^[A-Za-z]:\/+$/.test(ptr)) {
-    return `${ptr.slice(0, 2)}/`; // 盘根 'D:/'（含误写成 'D://' 的情况）
-  }
+  // 全是斜杠 → 归一成根
+  if (/^\/+$/.test(ptr)) return '/';
+  // 盘根 'D:/'（含误写成 'D://' 的情况）
+  if (/^[A-Za-z]:\/+$/.test(ptr)) return `${ptr.slice(0, 2)}/`;
   return ptr.replace(/\/+$/, '');
 }

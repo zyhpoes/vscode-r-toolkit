@@ -47,12 +47,9 @@ function toSymbol(node: OutlineNode, lines: TextLines): vscode.DocumentSymbol {
 
 /** 节点 → VS Code 的图标种类 */
 function symbolKindOf(node: OutlineNode): vscode.SymbolKind {
-  if (node.kind === 'class') {
-    return vscode.SymbolKind.Class;
-  }
-  if (node.kind === 'scope') {
-    return vscode.SymbolKind.Namespace; // 区是分组容器
-  }
+  if (node.kind === 'class') return vscode.SymbolKind.Class;
+  // 区是分组容器
+  if (node.kind === 'scope') return vscode.SymbolKind.Namespace;
   // 成员：active 绑定"读起来像字段、实际是函数"，用 Property 最贴切；
   // 其余成员暂用 Variable —— parser 目前不区分方法/字段，图标准确度要等它支持后再提升
   return node.scope === 'active' ? vscode.SymbolKind.Property : vscode.SymbolKind.Variable;

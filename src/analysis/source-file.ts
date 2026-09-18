@@ -39,7 +39,8 @@ export interface ParsedSourceFile {
 
 /**
  * 解析一个文件：**切一次词**，其余解析全部复用这份 token。
- * 这是全项目仅有的两处切词之一（另一处是 provider 切光标文件）。
+ * 切 **R 源文件**的地方（`src/` 内）只有两处：这里，以及 provider 切好光标文件的 token 后传进来。
+ * 另有 analysis/project-root.ts 的 parseBoxPathRoots 切 `.Rprofile` 文本 —— 那是配置解析，不属于这条不变量。
  *
  * `tokens` 可选是**契约的一部分**，不是随手加的灵活性：
  *   - 不传 → 自己切（`createContext`、测试等"手上只有文本"的调用方）
@@ -75,9 +76,7 @@ export function dedupeFiles(files: SourceFile[]): SourceFile[] {
   const seen = new Set<string>();
   const unique: SourceFile[] = [];
   for (const file of files) {
-    if (seen.has(file.uri)) {
-      continue;
-    }
+    if (seen.has(file.uri)) continue;
     seen.add(file.uri);
     unique.push(file);
   }

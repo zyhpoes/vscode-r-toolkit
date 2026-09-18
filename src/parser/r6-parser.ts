@@ -11,6 +11,7 @@
 
 import type { Token } from './tokenizer';
 import { matchBracket } from './brackets';
+import { splitTopLevel } from './utils';
 
 /** 成员所属的区 */
 export type R6Scope = 'public' | 'private' | 'active';
@@ -81,7 +82,7 @@ export interface InheritRef {
 
 /**
  * 从**已有 token** 里识别所有 R6 类定义。
- * 切词由调用方负责（provider 切光标文件、parseSourceFile 切依赖文件，全项目只有这两处切词）。
+ * 切词由调用方负责（provider 切光标文件、parseSourceFile 切依赖文件）。
  */
 export function parseR6(tokens: Token[]): R6ClassDef[] {
   const result: R6ClassDef[] = [];
@@ -89,9 +90,7 @@ export function parseR6(tokens: Token[]): R6ClassDef[] {
   for (let i = 0; i < tokens.length; i++) {
     // 当前位置是否是 R6Class 调用的名字开头
     const callName = r6CallTokenRange(tokens, i);
-    if (callName === null) {
-      continue;
-    }
+    if (callName === null) continue;
 
     // 名字后必须紧跟 '('，否则只是同名变量，不是调用
     const openToken = tokens[callName.enIndex + 1];
@@ -102,9 +101,8 @@ export function parseR6(tokens: Token[]): R6ClassDef[] {
     // 确定圆括号的坐标，方便后续调用
     const openIndex = callName.enIndex + 1;
     const closeIndex = matchBracket(tokens, openIndex, '(');
-    if (closeIndex === -1) {
-      continue; // 括号没配对（代码不完整），跳过
-    }
+    // 括号没配对（代码不完整），跳过
+    if (closeIndex === -1) continue;
 
     // 定类名：只看 <- 左侧；没有赋值则跳过。举个例子:
     // Persion <- R6::R6Class("Persion", ...) --> 保留
@@ -145,14 +143,10 @@ export function r6CallTokenRange(
   index: number,
 ): { stIndex: number; enIndex: number } | null {
   const t = tokens[index];
-  if (t.kind !== 'identifier') {
-    return null;
-  }
+  if (t.kind !== 'identifier') return null;
 
   // 裸形式：R6Class（只占 1 个 token，起止下标相同）
-  if (t.text === 'R6Class') {
-    return { stIndex: index, enIndex: index };
-  }
+  if (t.text === 'R6Class') return { stIndex: index, enIndex: index };
 
   // 命名空间形式：R6 :: R6Class（占 3 个 token）
   if (
@@ -217,35 +211,28 @@ function extractMembers(tokens: Token[], openIndex: number, closeIndex: number):
   const argRanges = splitTopLevel(tokens, openIndex, closeIndex);
 
   // 每个参数块：看开头是不是 `区名 = list( ... )`
-  // （只关心块起点 start；end 用不上，不解构避免未使用警告）
-  for (const [start] of argRanges) {
+  // （只关心块起点 stIndex；end 用不上，不解构避免未使用警告）
+  for (const [stIndex] of argRanges) {
     // 块第一个 token 必须是目标参数(public/private/active)
     // 如果不是目标参数，则剔除掉。比如: lock_objects就不是目标参数
-    const scope = scopeOf(tokens[start]?.text ?? '');
-    if (scope === null) {
-      continue;
-    }
+    // （`?.`：stIndex 越界时取不到 token，交给 scopeOf 当"不是区名"处理）
+    const scope = scopeOf(tokens[stIndex]?.text);
+    if (scope === null) continue;
 
     // 区名后必须跟 `= list(`
-    if (tokens[start + 1]?.kind !== 'operator' || tokens[start + 1].text !== '=') {
-      continue;
-    }
-    if (tokens[start + 2]?.kind !== 'identifier' || tokens[start + 2].text !== 'list') {
-      continue;
-    }
-    if (tokens[start + 3]?.kind !== 'operator' || tokens[start + 3].text !== '(') {
-      continue;
-    }
+    if (tokens[stIndex + 1]?.kind !== 'operator' || tokens[stIndex + 1].text !== '=') continue;
+    if (tokens[stIndex + 2]?.kind !== 'identifier' || tokens[stIndex + 2].text !== 'list') continue;
+    if (tokens[stIndex + 3]?.kind !== 'operator' || tokens[stIndex + 3].text !== '(') continue;
 
     // 找 scope（public/private/active）的 list 配对 ')'；配对失败说明代码不完整，跳过
-    const scopeCloseIndex = matchBracket(tokens, start + 3, '(');
+    const scopeCloseIndex = matchBracket(tokens, stIndex + 3, '(');
     if (scopeCloseIndex !== -1) {
       // tokens: 整个文件的 token
-      // start + 3: scope 的 list 开括号 '('
+      // stIndex + 3: scope 的 list 开括号 '('
       // scopeCloseIndex: 配对 ')' 的下标
       // scope: 成员所属类别（public/private/active）
       // 作用：解析 list 内容，得到该区成员，展开后收进 members
-      members.push(...parseMemberList(tokens, start + 3, scopeCloseIndex, scope));
+      members.push(...parseMemberList(tokens, stIndex + 3, scopeCloseIndex, scope));
     }
   }
 
@@ -271,29 +258,22 @@ function extractInherit(
 ): InheritRef | undefined {
   const argRanges = splitTopLevel(tokens, openIndex, closeIndex);
 
-  for (const [start] of argRanges) {
+  for (const [stIndex] of argRanges) {
     // 块起点必须是 inherit（public/private/active 等其它参数块直接跳过）
-    if (tokens[start]?.kind !== 'identifier' || tokens[start].text !== 'inherit') {
-      continue;
-    }
+    if (tokens[stIndex]?.kind !== 'identifier' || tokens[stIndex].text !== 'inherit') continue;
     // inherit 后必须跟 =
-    if (tokens[start + 1]?.kind !== 'operator' || tokens[start + 1].text !== '=') {
-      return undefined;
-    }
-    const ref = tokens[start + 2];
-    if (ref === undefined) {
-      return undefined; // inherit = 后漏写（代码不完整）
-    }
+    if (tokens[stIndex + 1]?.kind !== 'operator' || tokens[stIndex + 1].text !== '=') return undefined;
+    const ref = tokens[stIndex + 2];
+    // inherit = 后漏写（代码不完整）
+    if (ref === undefined) return undefined;
 
     // 引号字符串写法：inherit = "A"（内容即父类名）
-    if (ref.kind === 'string') {
-      return { kind: 'string', className: ref.text, offset: ref.offset };
-    }
+    if (ref.kind === 'string') return { kind: 'string', className: ref.text, offset: ref.offset };
 
     // 标识符写法：inherit = A 或 inherit = pkg$A
     if (ref.kind === 'identifier') {
       // 沿 $ 链走：名字与 $ 成对出现，每次 +2 移到下一个名字
-      let nameIdx = start + 2;
+      let nameIdx = stIndex + 2;
       let isChain = false;
       while (
         tokens[nameIdx + 1]?.kind === 'operator' &&
@@ -336,65 +316,25 @@ function extractInherit(
 }
 
 /**
- * 按"顶层逗号"把括号内部（开括号之后、闭括号之前）切成子区间数组。
- * 区间为 [openIndex+1, closeIndex)：跳过开括号本身、不含闭括号。
- *
- * 例：R6Class("Persion", public = list(A = a), private = list(C = c), lock_objects = FALSE)
- *     → 切成 4 块：["Persion", "public = list(A = a)", "private = list(C = c)", "lock_objects = FALSE"]
- *     注意：切的是"参数块"，每块内部的逗号（list 里的、{} 里的）不会误切。
- *     是否区名、要不要剔除，由调用方（extractMembers）判断 —— 本函数只负责切块。
- *     （export 供 analysis/box.ts 复用：切 box::use 括号内的模块）
- */
-export function splitTopLevel(
-  tokens: Token[], // 整个文件 tokenize 的结果
-  openIndex: number, // 开括号 '(' 的下标（函数内部从它的下一个开始切）
-  closeIndex: number // 配对 ')' 的下标（区间不含它，只作边界）
-): Array<[number, number]> {
-  const ranges: Array<[number, number]> = [];
-  // 第一个块的起点 = 开括号的下一个 token（跳过 '(' 本身）
-  let stItemIndex = openIndex + 1;
-  let depth = 0;
-  // 从开括号的下一个开始，扫到闭括号前结束
-  for (let j = openIndex + 1; j < closeIndex; j++) {
-    const t = tokens[j];
-    // 只有运算符参与切分判断（括号进/出深度、逗号分隔），其他 token 跳过
-    if (t.kind === 'operator') {
-      if (t.text === '(' || t.text === '{' || t.text === '[') {
-        depth++; // 进嵌套：里面的逗号不算顶层
-      } else if (t.text === ')' || t.text === '}' || t.text === ']') {
-        depth--; // 出嵌套
-      } else if (t.text === ',' && depth === 0) {
-        // 顶层逗号：当前块结束（[stItemIndex, j)），新块从逗号后开始
-        ranges.push([stItemIndex, j]);
-        stItemIndex = j + 1;
-      }
-    }
-  }
-  // 最后一块没有"结尾逗号"触发收尾，所以循环结束后必须手动补上 [stItemIndex, closeIndex)。
-  // 反面例子：若不补，R6Class("Persion", public = list(...), private = list(...))
-  // 只会切出 ["Persion", "public = list(...)"]，private 块会丢失。
-  ranges.push([stItemIndex, closeIndex]);
-  return ranges;
-}
-
-/**
  * 解析 scope（public/private/active）的 list 内容：按顶层逗号切成员项，每项取名字。
- * @param scopeOpenIndex  scope 的 list 开括号 '(' 下标
- * @param scopeCloseIndex scope 的 list 配对 ')' 下标
+ * 函数内只有这一对括号，没有别的下标会混淆，所以参数不去加 `scope` 前缀
+ * （调用方那边同时存在 R6Class 的括号，才需要 openIndex/closeIndex 区分）。
+ * @param openIndex  scope 的 list 开括号 '(' 下标
+ * @param closeIndex scope 的 list 配对 ')' 下标
  */
 function parseMemberList(
   tokens: Token[],
-  scopeOpenIndex: number,
-  scopeCloseIndex: number,
+  openIndex: number,
+  closeIndex: number,
   scope: R6Scope,
 ): R6Member[] {
   const members: R6Member[] = [];
 
   // 复用 splitTopLevel：按顶层逗号把 list 内容切成成员项
   // （方法体/索引里的逗号被括号挡在"非顶层"，不会被误切）
-  const itemRanges = splitTopLevel(tokens, scopeOpenIndex, scopeCloseIndex);
-  for (const [start] of itemRanges) {
-    const m = memberName(tokens, start, scope);
+  const itemRanges = splitTopLevel(tokens, openIndex, closeIndex);
+  for (const [stIndex] of itemRanges) {
+    const m = memberName(tokens, stIndex, scope);
     if (m !== null) {
       members.push(m);
     }
@@ -411,14 +351,12 @@ function memberName(tokens: Token[], stIndex: number, scope: R6Scope): R6Member 
   // 合法代码里成员项的第一个 token 就是成员名；
   // 只有代码不合法时第一个 token 才不是标识符 —— 这种情况直接返回 null，不处理。
   const t = tokens[stIndex];
-  if (t.kind === 'identifier') {
-    return { name: t.text, scope, nameOffset: t.offset };
-  }
+  if (t.kind === 'identifier') return { name: t.text, scope, nameOffset: t.offset };
   return null;
 }
 
 /** 判断标识符文本是否是 R6 的区名；是则返回区名，否则返回 null */
-function scopeOf(text: string): R6Scope | null {
+function scopeOf(text: string | undefined): R6Scope | null {
   return text === 'public' || text === 'private' || text === 'active' ? text : null;
 }
 

@@ -26,9 +26,7 @@ export function resolveParentNode(
   node: ClassWithFile,
 ): ClassWithFile | null {
   const inherit = node.classDef.inherit;
-  if (inherit === undefined) {
-    return null;
-  }
+  if (inherit === undefined) return null;
   // ?? null：findClassAcrossFiles 找不到返回 undefined，对外统一返回 null
   return findClassAcrossFiles(parsed, inherit.className) ?? null;
 }
@@ -74,9 +72,7 @@ export function findHierarchyMember(
     const member = node.classDef.members.find(
       (m) => m.name === memberName && scopes.includes(m.scope),
     );
-    if (member !== undefined) {
-      return { node, member };
-    }
+    if (member !== undefined) return { node, member };
   }
   return null;
 }

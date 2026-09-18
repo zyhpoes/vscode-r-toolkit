@@ -21,9 +21,7 @@ function evalVar(text: string, varName: string): ReturnType<typeof evaluateRhs> 
       break;
     }
   }
-  if (rhsStart === -1) {
-    throw new Error(`测试文本里找不到变量 ${varName} 的赋值`);
-  }
+  if (rhsStart === -1) throw new Error(`测试文本里找不到变量 ${varName} 的赋值`);
 
   // 类清单：从同一文本里的 R6Class 定义来（测试里简单场景类名即变量名）
   const classes = parseR6(tokenize(text));

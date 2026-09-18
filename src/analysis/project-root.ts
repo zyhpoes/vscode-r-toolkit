@@ -2,8 +2,7 @@ import * as path from 'path';
 import { isAbsoluteLike, stripTrailingSep } from '../utils/paths';
 import { tokenize } from '../parser/tokenizer';
 import { matchBracket } from '../parser/brackets';
-import { nextNonComment } from '../parser/token-utils';
-import { splitTopLevel } from '../parser/r6-parser';
+import { nextNonComment, splitTopLevel } from '../parser/utils';
 
 /** 候选根来源：用户配置 / .Rprofile 的 box.path / VS Code 工作区根 */
 export type RootSource = 'config' | 'boxpath' | 'workspace';
@@ -12,7 +11,7 @@ export type RootSource = 'config' | 'boxpath' | 'workspace';
  *  统一转小写：比较时把输入也转小写，做到大小写不敏感 */
 export const WORKSPACE_FOLDER = '${workspaceFolder}'.toLowerCase();
 
-/** 一个候选根：路径 + 来源（来源用于诊断输出） */
+/** 一个候选根：路径 + 来源（来源**只被记录、当前无人读**：日志里只打印路径） */
 export interface CandidateRoot {
   path: string;
   source: RootSource;
@@ -43,16 +42,12 @@ export interface CandidateRootsInput {
 export function collectCandidateRoots(input: CandidateRootsInput): CandidateRoot[] {
   // 来源1：用户配置（配了就不再看后面两层）
   const fromConfig = rootsFromConfig(input.config, input.workspace);
-  if (fromConfig.length > 0) {
-    return fromConfig;
-  }
+  if (fromConfig.length > 0) return fromConfig;
 
   // 来源2：项目级 .Rprofile 的 box.path
   if (input.boxpath !== undefined) {
     const fromBoxPath = parseBoxPathRoots(input.boxpath.text, input.boxpath.dir);
-    if (fromBoxPath.length > 0) {
-      return fromBoxPath;
-    }
+    if (fromBoxPath.length > 0) return fromBoxPath;
   }
 
   // 来源3：VS Code 工作区文件夹（兜底）
@@ -62,6 +57,7 @@ export function collectCandidateRoots(input: CandidateRootsInput): CandidateRoot
 /**
  * 来源1（优先级最高）：`settings.json` 里 `r-toolkit.boxPaths` 配的根。
  * 逐条目解析、按书写顺序拼接（顺序 = "先在哪找"的优先级）。
+ * 同一条目重复出现时会重复试（**有意不去重**：结果不受影响，只是多问几次文件是否存在）。
  * 读取设置由 provider 层负责（见 docs/项目根解析.md 的「实现位置」）。
  */
 export function rootsFromConfig(entries: string[], workspaceFolders: string[]): CandidateRoot[] {
@@ -105,25 +101,19 @@ export function findNearestRprofile(
   // 边界自己是根（'/' 或 'D:/'）时已经在末尾带分隔符，直接用它。
   // 这里不做大小写转换：两个路径都来自 VS Code，大小写一致。
   const insidePrefix = stopDir.endsWith('/') ? stopDir : stopDir + '/';
-  if (dir !== stopDir && !dir.startsWith(insidePrefix)) {
-    return undefined;
-  }
+  if (dir !== stopDir && !dir.startsWith(insidePrefix)) return undefined;
 
   while (true) {
     const candidate = path.posix.join(dir, RPROFILE_NAME);
-    if (exists(candidate)) {
-      return candidate; // 最近的一级，找到就停
-    }
-    if (dir === stopDir) {
-      return undefined; // 边界那一级也查过了 → 不再上溯
-    }
+    // 最近的一级，找到就停
+    if (exists(candidate)) return candidate;
+    // 边界那一级也查过了 → 不再上溯
+    if (dir === stopDir) return undefined;
     const parent = path.posix.dirname(dir);
-    if (parent === dir) {
-      // 兜底终止：dirname 到了固定点（'/' 或 '.'）却始终没碰到边界。
-      // 这不是空想 —— 边界是**盘根** `D:/` 时就会走到这里：
-      // `dirname('D:/') === '.'`，靠"上溯到边界"永远碰不到 `D:/` 本身。
-      return undefined;
-    }
+    // 兜底终止：dirname 到了固定点（'/' 或 '.'）却始终没碰到边界。
+    // 这不是空想 —— 边界是**盘根** `D:/` 时就会走到这里：
+    // `dirname('D:/') === '.'`，靠"上溯到边界"永远碰不到 `D:/` 本身。
+    if (parent === dir) return undefined;
     dir = parent;
   }
 }
@@ -144,26 +134,18 @@ export function parseBoxPathRoots(rprofileText: string, rprofileDir: string): Ca
 
   for (let i = 0; i < tokens.length; i++) {
     // 只找 `options (` 这种调用
-    if (tokens[i].kind !== 'identifier' || tokens[i].text !== 'options') {
-      continue;
-    }
-    if (tokens[i + 1]?.kind !== 'operator' || tokens[i + 1].text !== '(') {
-      continue;
-    }
+    if (tokens[i].kind !== 'identifier' || tokens[i].text !== 'options') continue;
+    if (tokens[i + 1]?.kind !== 'operator' || tokens[i + 1].text !== '(') continue;
 
     const closeIndex = matchBracket(tokens, i + 1, '(');
-    if (closeIndex === -1) {
-      continue; // 括号没配对（文件不完整）→ 跳过这次 options()
-    }
+    // 括号没配对（文件不完整）→ 跳过这次 options()
+    if (closeIndex === -1) continue;
 
     // 在参数里找 `box.path = ...`（按顶层逗号切参数：options(a = 1, box.path = "...")）
     for (const [stArg] of splitTopLevel(tokens, i + 1, closeIndex)) {
-      if (tokens[stArg]?.kind !== 'identifier' || tokens[stArg].text !== 'box.path') {
-        continue;
-      }
-      if (tokens[stArg + 1]?.kind !== 'operator' || tokens[stArg + 1].text !== '=') {
-        continue; // 写法不规范（box.path 不是具名参数）→ 不当它是配置
-      }
+      if (tokens[stArg]?.kind !== 'identifier' || tokens[stArg].text !== 'box.path') continue;
+      // 写法不规范（box.path 不是具名参数）→ 不当它是配置
+      if (tokens[stArg + 1]?.kind !== 'operator' || tokens[stArg + 1].text !== '=') continue;
 
       // 找到 box.path：能识别的字面量就用它，其余（动态表达式 / 值漏写）回落所在目录
       const valueToken = nextNonComment(tokens, stArg + 2);
@@ -200,9 +182,7 @@ export function rootsFromWorkspace(workspaceFolders: string[]): CandidateRoot[] 
 function rootsFromConfigEntry(entry: string, workspaceFolders: string[]): CandidateRoot[] {
   const trimmed = entry.trim();
   // 传入的是空值的话那也返回空数组
-  if (trimmed === '') {
-    return [];
-  }
+  if (trimmed === '') return [];
 
   // 占位符大小写不敏感：输入转小写后与（已转小写的）常量比较；切尾巴用原长度（长度不随大小写变）
   if (trimmed.toLowerCase().startsWith(WORKSPACE_FOLDER)) {
@@ -214,14 +194,10 @@ function rootsFromConfigEntry(entry: string, workspaceFolders: string[]): Candid
   }
 
   // 无法识别的情况直接返回空数组
-  if (trimmed.includes('${')) {
-    return [];
-  }
+  if (trimmed.includes('${')) return [];
 
   // 如果是绝对路径就直接返回
-  if (isAbsoluteLike(trimmed)) {
-    return [{ path: trimmed, source: 'config' }];
-  }
+  if (isAbsoluteLike(trimmed)) return [{ path: trimmed, source: 'config' }];
 
   // 处理相对路径：相对"工作区文件夹"，多根工作区时每个文件夹各算一个候选
   return workspaceFolders.map((folder) => ({

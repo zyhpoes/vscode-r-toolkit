@@ -24,7 +24,7 @@ export interface TopLevelSymbol {
 
 /**
  * 从**已有 token** 里取顶层符号（按出现顺序；同名多次赋值会都出现，调用方取第一个即可）。
- * 切词由调用方负责（provider 切光标文件、parseSourceFile 切依赖文件，全项目只有这两处切词）。
+ * 切词由调用方负责（provider 切光标文件、parseSourceFile 切依赖文件）。
  *
  * "顶层"靠**括号深度**判断，与缩进无关：只有在深度 0 出现的 `名字 <- ...` / `名字 = ...` 才算。
  * 这样函数体内部的 `bar <- 1`、调用里的具名参数 `f(a = 1)` 都自然被排除。
@@ -41,12 +41,8 @@ export function parseTopLevelSymbols(tokens: Token[]): TopLevelSymbol[] {
       continue;
     }
 
-    if (depth !== 0 || token.kind !== 'identifier' || isHidden(token.text)) {
-      continue;
-    }
-    if (!isAssignOperator(tokens[i + 1])) {
-      continue;
-    }
+    if (depth !== 0 || token.kind !== 'identifier' || isHidden(token.text)) continue;
+    if (!isAssignOperator(tokens[i + 1])) continue;
     symbols.push({ name: token.text, offset: token.offset });
   }
 
@@ -65,9 +61,7 @@ export function resolveModuleBindingFile(
   moduleUriByBinding: Map<string, string>,
 ): string | null {
   const wordIndex = findWordIndexAt(ctx, cursorOffset);
-  if (wordIndex === -1) {
-    return null;
-  }
+  if (wordIndex === -1) return null;
   return moduleUriByBinding.get(ctx.cursorFile.tokens[wordIndex].text) ?? null;
 }
 
@@ -94,29 +88,22 @@ export function resolveAttachNameDefinition(
   attachByName: Map<string, AttachNameTarget>,
 ): DefinitionSite | null {
   const wordIndex = findWordIndexAt(ctx, cursorOffset);
-  if (wordIndex === -1) {
-    return null;
-  }
+  if (wordIndex === -1) return null;
 
   const prev = ctx.cursorFile.tokens[wordIndex - 1];
-  if (prev?.kind === 'operator' && prev.text === '$') {
-    return null; // 成员访问形状，不是附着进来的裸名字
-  }
+  // 成员访问形状，不是附着进来的裸名字
+  if (prev?.kind === 'operator' && prev.text === '$') return null;
 
   const target = attachByName.get(ctx.cursorFile.tokens[wordIndex].text);
-  if (target === undefined) {
-    return null;
-  }
+  if (target === undefined) return null;
 
   const moduleFile = ctx.parsed.find((p) => p.file.uri === target.moduleUri);
-  if (moduleFile === undefined) {
-    return null; // 模块文件没被加载（读不出来），跳不了
-  }
+  // 模块文件没被加载（读不出来），跳不了
+  if (moduleFile === undefined) return null;
 
   const symbol = moduleFile.symbols.find((one) => one.name === target.source);
-  if (symbol === undefined) {
-    return null; // 模块里没有这个名字（例如它是函数体内部的局部变量）
-  }
+  // 模块里没有这个名字（例如它是函数体内部的局部变量）
+  if (symbol === undefined) return null;
 
   return definitionSiteAt(symbol.name, moduleFile, symbol.offset);
 }
@@ -135,45 +122,34 @@ export function resolveModuleMemberDefinition(
   moduleUriByBinding: Map<string, string>,
 ): DefinitionSite | null {
   const wordIndex = findWordIndexAt(ctx, cursorOffset);
-  if (wordIndex === -1) {
-    return null;
-  }
+  if (wordIndex === -1) return null;
 
   // 形状必须是 `绑定名 $ 成员名`
   const memberToken = ctx.cursorFile.tokens[wordIndex];
   const dollarToken = ctx.cursorFile.tokens[wordIndex - 1];
   const bindingToken = ctx.cursorFile.tokens[wordIndex - 2];
-  if (dollarToken?.text !== '$' || bindingToken?.kind !== 'identifier') {
-    return null;
-  }
+  if (dollarToken?.text !== '$' || bindingToken?.kind !== 'identifier') return null;
 
   const moduleUri = moduleUriByBinding.get(bindingToken.text);
-  if (moduleUri === undefined) {
-    return null; // 这个绑定名不是本文件的 box 模块（可能是 R6 类名等）
-  }
+  // 这个绑定名不是本文件的 box 模块（可能是 R6 类名等）
+  if (moduleUri === undefined) return null;
 
   const moduleFile = ctx.parsed.find((parsed) => parsed.file.uri === moduleUri);
-  if (moduleFile === undefined) {
-    return null; // 模块文件没被加载（读不出来），跳不了
-  }
+  // 模块文件没被加载（读不出来），跳不了
+  if (moduleFile === undefined) return null;
 
   // 顶层符号在 ctx 组装时就随 parseSourceFile 算好了（每文件一份），这里查缓存、不重解析
   const symbol = moduleFile.symbols.find((one) => one.name === memberToken.text);
-  if (symbol === undefined) {
-    return null; // 模块里没有这个顶层名字
-  }
+  // 模块里没有这个顶层名字
+  if (symbol === undefined) return null;
 
   return definitionSiteAt(symbol.name, moduleFile, symbol.offset);
 }
 
 /** 括号对深度的贡献：开括号 +1、闭括号 -1、其它运算符 0 */
 function bracketDepthDelta(text: string): number {
-  if (text === '(' || text === '{' || text === '[') {
-    return 1;
-  }
-  if (text === ')' || text === '}' || text === ']') {
-    return -1;
-  }
+  if (text === '(' || text === '{' || text === '[') return 1;
+  if (text === ')' || text === '}' || text === ']') return -1;
   return 0;
 }
 

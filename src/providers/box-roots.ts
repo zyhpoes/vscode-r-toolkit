@@ -25,7 +25,7 @@ const BOX_PATHS_KEY = 'boxPaths';
  * 算出这个文件的 box 候选根：
  * 来源1 `r-toolkit.boxPaths` → 来源2 项目级 `.Rprofile` 的 `box.path` → 来源3 工作区根。
  * @param documentUri 当前 R 文件的 uri（决定"从哪向上找 .Rprofile"、"相对路径按哪个工作区展开"）
- * @returns 候选根（含来源标记，用于诊断输出）；三层都空 → 空数组（上层据此不跳转）
+ * @returns 候选根（含来源标记；标记**只被记录、当前无人读** —— 日志里只打印路径）；三层都空 → 空数组（上层据此不跳转）
  */
 export function resolveBoxRoots(documentUri: vscode.Uri): CandidateRoot[] {
   return collectCandidateRoots(readRootsInput(documentUri));
@@ -34,23 +34,19 @@ export function resolveBoxRoots(documentUri: vscode.Uri): CandidateRoot[] {
 /** 把 VS Code 环境读成三层来源的原始材料 */
 function readRootsInput(documentUri: vscode.Uri): CandidateRootsInput {
   const config = readBoxPathsSetting();
-  const workspace = workspaceFolderPaths();
   const boxpath = readNearestRprofile(documentUri);
+  const workspace = workspaceFolderPaths();
 
   // 本项目开了 exactOptionalPropertyTypes：`boxpath?: X` 不接受显式传 undefined，
   // 所以"没有 .Rprofile"时要整个键都不写
-  if (boxpath === undefined) {
-    return { config, workspace };
-  }
+  if (boxpath === undefined) return { config, workspace };
   return { config, boxpath, workspace };
 }
 
 /** 读 `r-toolkit.boxPaths`；不是数组、或条目不是字符串 → 一律丢弃（不猜用户意图） */
 function readBoxPathsSetting(): string[] {
   const raw: unknown = vscode.workspace.getConfiguration(CONFIG_SECTION).get(BOX_PATHS_KEY);
-  if (!Array.isArray(raw)) {
-    return [];
-  }
+  if (!Array.isArray(raw)) return [];
   return raw.filter((entry): entry is string => typeof entry === 'string');
 }
 
@@ -66,16 +62,12 @@ function workspaceFolderPaths(): string[] {
  */
 function readNearestRprofile(documentUri: vscode.Uri): { text: string; dir: string } | undefined {
   const folder = vscode.workspace.getWorkspaceFolder(documentUri);
-  if (folder === undefined) {
-    return undefined;
-  }
+  if (folder === undefined) return undefined;
 
   const fileDir = path.posix.dirname(toPosix(documentUri.fsPath));
   const stopDir = toPosix(folder.uri.fsPath);
   const rprofilePath = findNearestRprofile(fileDir, stopDir, fs.existsSync);
-  if (rprofilePath === undefined) {
-    return undefined;
-  }
+  if (rprofilePath === undefined) return undefined;
 
   try {
     return {

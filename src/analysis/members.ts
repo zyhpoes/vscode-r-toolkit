@@ -33,35 +33,25 @@ export function resolveMemberDefinition(
   // 找光标下的 identifier（返回下标，后面要靠它回看前两个 token）
   const tokens = ctx.cursorFile.tokens;
   const wordIdx = findWordIndexAt(ctx, cursorOffset);
-  if (wordIdx === -1) {
-    return null;
-  }
+  if (wordIdx === -1) return null;
   const word = tokens[wordIdx];
 
   // 向前找紧邻的 '$'（wordIdx-1 必须是 '$'，否则不是成员引用）
   const dollar = tokens[wordIdx - 1];
-  if (dollar?.kind !== 'operator' || dollar.text !== '$') {
-    return null;
-  }
+  if (dollar?.kind !== 'operator' || dollar.text !== '$') return null;
 
   // 看 '$' 前是什么 → 决定"去哪找成员"
   const before = tokens[wordIdx - 2];
-  if (before?.kind !== 'identifier') {
-    return null;
-  }
+  if (before?.kind !== 'identifier') return null;
 
   // ── super$：父类链上的成员（不含本类）──────────────────────────
   if (before.text === 'super') {
     // super 只能写在类方法体里：先反查"光标在哪个类中"，那个类就是"我"
     const holder = containingClass(ctx, wordIdx);
-    if (holder === undefined) {
-      return null;
-    }
+    if (holder === undefined) return null;
     // super$xxx = 父类的 xxx：从 holder 的父类起向上找（includeStart=false 跳过本类）
     const hit = findHierarchyMember(ctx.parsed, holder, word.text, PUBLIC_VISIBLE, false);
-    if (hit === null) {
-      return null;
-    }
+    if (hit === null) return null;
     return definitionSiteAt(word.text, hit.node.parsed, hit.member.nameOffset);
   }
 
@@ -69,16 +59,12 @@ export function resolveMemberDefinition(
   if (before.text === 'private') {
     // private 只能写在类方法体里：反查光标所在类
     const holder = containingClass(ctx, wordIdx);
-    if (holder === undefined) {
-      return null;
-    }
+    if (holder === undefined) return null;
     // R6：private 不随继承 —— 子类看不到父类的 private，所以只在本类找、不往上走
     const member = holder.classDef.members.find(
       (m) => m.name === word.text && m.scope === 'private',
     );
-    if (member !== undefined) {
-      return definitionSiteAt(word.text, holder.parsed, member.nameOffset);
-    }
+    if (member !== undefined) return definitionSiteAt(word.text, holder.parsed, member.nameOffset);
     // 本类没有这个 private → 兜底查合成成员（new）
     return resolveSynthetic(holder, word.text);
   }
@@ -87,14 +73,10 @@ export function resolveMemberDefinition(
   if (before.text === 'self') {
     // self 也只能写在类方法体里：反查光标所在类
     const holder = containingClass(ctx, wordIdx);
-    if (holder === undefined) {
-      return null;
-    }
+    if (holder === undefined) return null;
     // 继承来的方法 self 也能调：先本类后父类（includeStart=true，最近祖先优先）
     const hit = findHierarchyMember(ctx.parsed, holder, word.text, PUBLIC_VISIBLE, true);
-    if (hit !== null) {
-      return definitionSiteAt(word.text, hit.node.parsed, hit.member.nameOffset);
-    }
+    if (hit !== null) return definitionSiteAt(word.text, hit.node.parsed, hit.member.nameOffset);
     // 本类和父类都没有 → 兜底查合成成员（new）
     return resolveSynthetic(holder, word.text);
   }
@@ -102,13 +84,9 @@ export function resolveMemberDefinition(
   // ── 类名$ / 实例变量$（Person$greet / p$greet）─────────────────
   // 类外的访问只能看到 public/active（含继承来的），private 一律看不见
   const target = resolveNamedTarget(ctx, before.text, cursorOffset);
-  if (target === undefined) {
-    return null;
-  }
+  if (target === undefined) return null;
   const hit = findHierarchyMember(ctx.parsed, target, word.text, PUBLIC_VISIBLE, true);
-  if (hit !== null) {
-    return definitionSiteAt(word.text, hit.node.parsed, hit.member.nameOffset);
-  }
+  if (hit !== null) return definitionSiteAt(word.text, hit.node.parsed, hit.member.nameOffset);
   return resolveSynthetic(target, word.text);
 }
 
@@ -120,9 +98,7 @@ function containingClass(ctx: AnalysisContext, wordIdx: number): ClassWithFile |
   const classDef = ctx.cursorFile.classes.find(
     (c) => c.stIndex <= wordIdx && wordIdx <= c.enIndex,
   );
-  if (classDef === undefined) {
-    return undefined;
-  }
+  if (classDef === undefined) return undefined;
   return { classDef, parsed: ctx.cursorFile };
 }
 
@@ -137,9 +113,7 @@ function resolveNamedTarget(
   cursorOffset: number,
 ): ClassWithFile | undefined {
   const asClass = findClassAcrossFiles(ctx.parsed, name);
-  if (asClass !== undefined) {
-    return asClass;
-  }
+  if (asClass !== undefined) return asClass;
   const type = resolveVarType(ctx, name, cursorOffset);
   if (type !== null && type.kind === 'class') {
     return findClassAcrossFiles(ctx.parsed, type.className);
@@ -150,8 +124,6 @@ function resolveNamedTarget(
 /** 合成成员兜底：new 是 R6 自动生成的，每个类有自己的一份（指向本类 initialize 或类定义） */
 function resolveSynthetic(target: ClassWithFile, name: string): DefinitionSite | null {
   const synthetic = target.classDef.synthetic.find((s) => s.name === name);
-  if (synthetic === undefined) {
-    return null;
-  }
+  if (synthetic === undefined) return null;
   return definitionSiteAt(name, target.parsed, synthetic.nameOffset);
 }

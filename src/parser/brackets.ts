@@ -24,23 +24,17 @@ const CLOSE_BY_OPEN: Record<string, string> = {
  */
 export function matchBracket(tokens: Token[], openIndex: number, openChar: string): number {
   const closeChar = CLOSE_BY_OPEN[openChar];
-  if (closeChar === undefined) {
-    throw new Error(`matchBracket: 不支持的开括号 "${openChar}"`);
-  }
+  if (closeChar === undefined) throw new Error(`matchBracket: 不支持的开括号 "${openChar}"`);
 
   let depth = 1;
   for (let j = openIndex + 1; j < tokens.length; j++) {
     const t = tokens[j];
-    if (t.kind !== 'operator') {
-      continue;
-    }
+    if (t.kind !== 'operator') continue;
     if (t.text === openChar) {
       depth++;
     } else if (t.text === closeChar) {
       depth--;
-      if (depth === 0) {
-        return j;
-      }
+      if (depth === 0) return j;
     }
   }
   return -1;

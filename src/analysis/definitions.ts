@@ -53,16 +53,12 @@ export function resolveClassDefinition(
 ): DefinitionSite | null {
   // 找光标下的词（只在光标所在文件里找：ctx.cursorFile.tokens 那份文本）
   const wordIdx = findWordIndexAt(ctx, cursorOffset);
-  if (wordIdx === -1) {
-    return null;
-  }
+  if (wordIdx === -1) return null;
   const word = ctx.cursorFile.tokens[wordIdx];
 
   // 在所有文件里找同名类：当前文件优先（先出现先匹配），找不到再去依赖文件
   const cls = findClassAcrossFiles(ctx.parsed, word.text);
-  if (cls === undefined) {
-    return null;
-  }
+  if (cls === undefined) return null;
 
   return definitionSiteAt(cls.classDef.name, cls.parsed, cls.classDef.nameOffset);
 }
@@ -80,16 +76,12 @@ export function resolveVariableDefinition(
 ): DefinitionSite | null {
   // 找光标下的词
   const wordIdx = findWordIndexAt(ctx, cursorOffset);
-  if (wordIdx === -1) {
-    return null;
-  }
+  if (wordIdx === -1) return null;
   const word = ctx.cursorFile.tokens[wordIdx];
 
   // 首选：该变量"光标前最近一次"赋值（逻辑在 bindings.ts，与类型推断共用同一份）
   const binding = findLatestBinding(ctx.cursorFile.bindings, word.text, cursorOffset);
-  if (binding !== undefined) {
-    return definitionSiteAt(word.text, ctx.cursorFile, binding.offset);
-  }
+  if (binding !== undefined) return definitionSiteAt(word.text, ctx.cursorFile, binding.offset);
 
   // 兜底：顶层用 `=` 定义的（bindings 只记 `<-`，而 symbols 两种赋值号都记）
   // 两条约束与主路径保持一致：
@@ -102,9 +94,8 @@ export function resolveVariableDefinition(
       hit = symbol;
     }
   }
-  if (hit === undefined) {
-    return null; // 光标前没有赋值（可能还没赋值，或根本不是变量）
-  }
+  // 光标前没有赋值（可能还没赋值，或根本不是变量）
+  if (hit === undefined) return null;
 
   return definitionSiteAt(hit.name, ctx.cursorFile, hit.offset);
 }
@@ -127,9 +118,7 @@ export function findClassAcrossFiles(
 ): ClassWithFile | undefined {
   for (const entry of parsed) {
     const cls = entry.classes.find((c) => c.name === className);
-    if (cls !== undefined) {
-      return { classDef: cls, parsed: entry };
-    }
+    if (cls !== undefined) return { classDef: cls, parsed: entry };
   }
   return undefined;
 }
