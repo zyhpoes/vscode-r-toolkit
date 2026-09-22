@@ -72,24 +72,9 @@ describe('parseBoxImports 解析 box::use', () => {
     expect(parseBoxImports(tokenize('# box::use(person)'))).toEqual([]);
   });
 
-  it('带引号的路径：box::use("person/utils/x") → 整串算一段', () => {
-    expect(brief('box::use("person/utils/x")')).toEqual([
-      { segments: ['person/utils/x'], relative: 'root', offset: 0 },
-    ]);
-  });
-
-  it('引号路径 + 外部导出：box::use("person/utils/x"[Person])', () => {
-    // [Person] 在引号外（合法写法），路径 = 引号内容
-    expect(brief('box::use("person/utils/x"[Person])')).toEqual([
-      { segments: ['person/utils/x'], relative: 'root', offset: 0 },
-    ]);
-  });
-
-  it('引号误带导出（非法写法）：box::use("person/utils/x[Person]") 剥掉 [导出]', () => {
-    // 防御：导出列表误写进引号（box 运行时会报错），剥掉避免路径带脏
-    expect(brief('box::use("person/utils/x[Person]")')).toEqual([
-      { segments: ['person/utils/x'], relative: 'root', offset: 0 },
-    ]);
+  it('字符串路径不算导入：box 不接受（1.2.2 实测 `expected a module or package name`）', () => {
+    expect(parseBoxImports(tokenize('box::use("person/utils/x")'))).toEqual([]);
+    expect(parseBoxImports(tokenize('box::use(m = "person/utils/x")'))).toEqual([]);
   });
 
   it('字符串里的 box::use 不算数', () => {
@@ -98,6 +83,26 @@ describe('parseBoxImports 解析 box::use', () => {
 
   it('没有 box 导入 → 空数组', () => {
     expect(parseBoxImports(tokenize('x <- 1'))).toEqual([]);
+  });
+});
+
+describe('条目里的注释不该让导入消失（注释在括号内任何位置都合法）', () => {
+  it('条目末尾的注释：路径照常解析（对照组，改动前后都应通过）', () => {
+    const text = ['box::use(person # 说明', ')'].join('\n');
+    expect(brief(text)).toEqual([{ segments: ['person'], relative: 'root', offset: 0 }]);
+  });
+
+  it('第一个条目以注释开头 → 这条导入仍应解析出来', () => {
+    const text = ['box::use(', '  # 说明', '  person', ')'].join('\n');
+    expect(brief(text)).toEqual([{ segments: ['person'], relative: 'root', offset: 0 }]);
+  });
+
+  it('逗号后紧跟注释 → 那一条仍应解析出来', () => {
+    const text = ['box::use(person,', '  # 工具', '  ./helper', ')'].join('\n');
+    expect(brief(text)).toEqual([
+      { segments: ['person'], relative: 'root', offset: 0 },
+      { segments: ['helper'], relative: 'file', offset: 0 },
+    ]);
   });
 });
 
@@ -124,11 +129,6 @@ describe('parseBoxImports 分段偏移（点击跳转要判断光标落在哪一
     expect(imp.segments).toEqual([{ name: 'helper', offset: text.indexOf('helper') }]);
   });
 
-  it('引号写法：段的偏移指向开引号位置', () => {
-    const text = 'box::use("person/utils/x")';
-    const [imp] = parseBoxImports(tokenize(text));
-    expect(imp.segments).toEqual([{ name: 'person/utils/x', offset: text.indexOf('"') }]);
-  });
 });
 
 describe('modulePathOf 由分段派生路径字符串', () => {
@@ -169,12 +169,6 @@ describe('模块别名 m = path 与模块绑定名', () => {
     expect(imp.alias).toBe('m');
     expect(imp.segments.map((s) => s.name)).toEqual(['helper']);
     expect(imp.relative).toBe('file');
-  });
-
-  it('别名 + 引号路径：box::use(m = "person/utils/x")', () => {
-    const [imp] = parseBoxImports(tokenize('box::use(m = "person/utils/x")'));
-    expect(imp.alias).toBe('m');
-    expect(imp.segments.map((s) => s.name)).toEqual(['person/utils/x']);
   });
 
   it('没写别名 → alias 为 undefined，绑定名取路径最后一段', () => {
@@ -240,7 +234,8 @@ describe('附着清单 [a, b] / [g = f] 与"不绑模块名"', () => {
     expect(imp.attach).toEqual([{ alias: 'g', source: 'f' }]);
   });
 
-  it('别名 + 附着清单：box::use(m = prefix/mod[name1, name2])', () => {
+  it('别名 + 附着清单：box::use(m = prefix/mod[name1, name2]) → 别名照常绑模块名', () => {
+    // R 实测确认：box 同时绑别名与附着名（`exists('m')` 与 `m$name1` 都成立）→ 别名优先
     const [imp] = parseBoxImports(tokenize('box::use(m = prefix/mod[name1, name2])'));
     expect(imp.alias).toBe('m');
     expect(imp.segments.map((s) => s.name)).toEqual(['prefix', 'mod']);
@@ -248,13 +243,18 @@ describe('附着清单 [a, b] / [g = f] 与"不绑模块名"', () => {
       { alias: 'name1', source: 'name1' },
       { alias: 'name2', source: 'name2' },
     ]);
-    expect(moduleBindingName(imp)).toBeUndefined();
+    expect(moduleBindingName(imp)).toBe('m');
   });
 
-  it('引号路径 + 清单：box::use("person/utils/x"[Person]) → 路径一段、附着一名', () => {
-    const [imp] = parseBoxImports(tokenize('box::use("person/utils/x"[Person])'));
-    expect(imp.segments.map((s) => s.name)).toEqual(['person/utils/x']);
-    expect(imp.attach).toEqual([{ alias: 'Person', source: 'Person' }]);
+  it('多条各自带别名 + 清单：两条的别名都绑上', () => {
+    const imps = parseBoxImports(tokenize('box::use(a = R/x[A = a], b = R/y[C = c])'));
+    expect(imps.map((imp) => moduleBindingName(imp))).toEqual(['a', 'b']);
+  });
+
+  it('别名 + 全部附着：box::use(a = R/x[...]) → 仍绑别名（R 实测 exists("a") 为真）', () => {
+    const [imp] = parseBoxImports(tokenize('box::use(a = R/x[...])'));
+    expect(imp.attach).toEqual([]);
+    expect(moduleBindingName(imp)).toBe('a');
   });
 
   it('名单里混着注释：注释不占名字，也不打乱左右对应', () => {
@@ -317,14 +317,6 @@ describe('segmentAtOffset 光标踩在第几段上（模块名跳转用）', () 
     expect(segmentAtOffset(imports, 10)).toBeUndefined(); // 分隔符 '/'
     expect(segmentAtOffset(imports, 17)).toBeUndefined(); // 收尾的 ')'
     expect(segmentAtOffset(imports, 11)?.segmentIndex).toBe(1); // 'schema' 本身命中
-  });
-
-  it('引号写法：段的偏移是开引号位置，点引号上也算命中', () => {
-    // box::use("person/utils/x") —— 引号在 9
-    const imports = parseBoxImports(tokenize('box::use("person/utils/x")'));
-    const hit = segmentAtOffset(imports, 9);
-    expect(hit?.segmentIndex).toBe(0);
-    expect(modulePathOf(hit!.imp)).toBe('person/utils/x');
   });
 
   it('相对路径：前导 ./ 不算一段，偏移指向真正的段名', () => {

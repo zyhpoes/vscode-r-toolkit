@@ -16,7 +16,7 @@ import {
 } from '../analysis/definitions';
 import { resolveMemberDefinition } from '../analysis/members';
 import { createContextFromParsed, type AnalysisContext } from '../analysis/context';
-import { findTokenIndexAt } from '../analysis/cursor';
+import { findWordIndexAt } from '../analysis/cursor';
 import { moduleBindingName, modulePathOf, parseBoxImports, segmentAtOffset, type BoxImport } from '../analysis/box';
 import { baseDirsForImport, resolveModuleFilePath } from '../analysis/module-file';
 import {
@@ -164,10 +164,10 @@ function locateModuleFile(
   document: vscode.TextDocument,
   rootDirs: string[],
 ): string | null {
-  const tokenIndex = findTokenIndexAt(ctx, cursorOffset);
+  const tokenIndex = findWordIndexAt(ctx, cursorOffset);
   if (tokenIndex === -1) return null;
 
-  const hit = segmentAtOffset(imports, ctx.cursorFile.tokens[tokenIndex].offset);
+  const hit = segmentAtOffset(imports, ctx.cursorFile.tokens[tokenIndex].stOffset);
   if (hit === undefined) return null;
 
   return resolveImportFilePath(document, hit.imp, hit.segmentIndex, rootDirs) ?? null;

@@ -8,7 +8,7 @@
 
 import { type Token } from '../parser/tokenizer';
 import { matchBracket } from '../parser/brackets';
-import { nextNonComment, nextNonCommentIndex, splitTopLevel } from '../parser/utils';
+import { splitTopLevel } from '../parser/utils';
 
 /** 模块路径的基准：从哪找模块文件 */
 export type BoxRelative = 'root' | 'file';
@@ -31,7 +31,7 @@ export interface BoxAttachName {
 
 /** 一条 box 导入 */
 export interface BoxImport {
-  /** 路径分段（`R/schema/schema` → 三段；引号写法整串算一段）；`[附着清单]` 不算在内 */
+  /** 路径分段（`R/schema/schema` → 三段）；`[附着清单]` 不算在内 */
   segments: ModuleSegment[];
   /** 基准：root = 候选根（box 根）；file = 相对当前文件目录 */
   relative: BoxRelative;
@@ -53,19 +53,21 @@ export function modulePathOf(imp: BoxImport): string {
 
 /**
  * 这条导入在当前作用域绑定的"模块名"（代码里 `schema$xxx` 的 schema 就是它）。
- * 规则：写了附着清单 `[a, b]` → **不绑模块名**（R 里那些名字是裸名字，没有 `pkg$`）；
- *       否则默认取路径最后一段，写了别名则取别名。
+ * 规则（三条都经 R 实测确认）：
+ *   写了别名（`a = R/x[...]`，含 `[...]`）→ 绑别名；
+ *   没写别名但有附着清单（`R/x[a]`）→ 不绑（R 里那些名字是裸名字，没有 `pkg$`）；
+ *   其余 → 取路径最后一段。
  * @returns 模块绑定名；不绑模块名（附着写法）→ undefined
  */
 export function moduleBindingName(imp: BoxImport): string | undefined {
+  if (imp.alias !== undefined) return imp.alias;
   if (imp.attach !== undefined) return undefined;
-  return imp.alias ?? imp.segments[imp.segments.length - 1]?.name;
+  return imp.segments[imp.segments.length - 1]?.name;
 }
 
 /**
  * 光标（token 起点偏移）踩在哪个导入的哪一段上 —— 模块名跳转的入口查询。
- * 用"**精确相等**"而不是区间判断：段的 offset 就是那个 token 的起点，
- * 裸路径对标识符 token、引号路径对 string token（起点是开引号）都成立，
+ * 用"**精确相等**"而不是区间判断：段的 offset 就是那个标识符 token 的起点，
  * 于是完全不需要长度/边界的换算，也就没有 off-by-one 的空间。
  * @param imports parseBoxImports 的结果
  * @param offset  光标所在 token 的起点偏移
@@ -108,7 +110,7 @@ export function parseBoxImports(tokens: Token[]): BoxImport[] {
     // 括号内按顶层逗号切成模块段，逐段解析
     const segments = splitTopLevel(tokens, openIndex, closeIndex);
     for (const [segStart] of segments) {
-      const imp = parseSegment(tokens, segStart, tokens[i].offset);
+      const imp = parseSegment(tokens, segStart, tokens[i].stOffset);
       if (imp !== null) {
         result.push(imp);
       }
@@ -165,7 +167,7 @@ function readEntryAlias(tokens: Token[], stSegment: number): string | undefined 
 /**
  * 读模块路径：返回路径分段、基准（root = 候选根；file = 相对当前文件目录）
  * 以及**停在了哪个 token**（enIndex，供调用方接着读附着清单）。
- * 支持两种写法：不带引号（`R/schema/schema`，`.` / `..` 也是合法段）与带引号（整串算一段）。
+ * 写法只有一种：`R/schema/schema`（`.` / `..` 也是合法段）。
  * 走到非路径 token（`[`、`,`、`)` 等）就停；形状不合法 → null。
  */
 function readModulePath(
@@ -175,19 +177,7 @@ function readModulePath(
   const first = tokens[stPath];
   if (first === undefined) return null;
 
-  // 带引号写法："person/utils/x" 是一个 string token，内容直接就是完整路径（整串算一段）
-  if (first.kind === 'string') {
-    // 防御：合法写法是 `"path"[Person]`（导出列表在引号外）。
-    // 万一用户误写成 `"path[Person]"`（把导出列表写进引号里，这是非法写法，
-    // box 运行时会报错），这里剥掉字符串里误带的 [导出]，避免路径带上脏内容找错文件。
-    const bracketIdx = first.text.indexOf('[');
-    const name = bracketIdx === -1 ? first.text : first.text.slice(0, bracketIdx);
-    if (name === '') return null;
-    // 引号后面一个 token 就是路径之外（可能是 `[`）
-    return { segments: [{ name, offset: first.offset }], relative: 'root', enIndex: stPath + 1 };
-  }
-
-  // 不带引号：路径起点必须是标识符（person、proj；./ 的 . 和 ../ 的 .. 也是标识符）
+  // 路径起点必须是标识符（person、proj；./ 的 . 和 ../ 的 .. 也是标识符）
   if (first.kind !== 'identifier') return null;
 
   // 收路径分段：只认标识符（段名）与 '/'（层级分隔），遇到其他 token 就结束
@@ -198,7 +188,7 @@ function readModulePath(
     // 开始附着清单 → 路径结束
     if (t.kind === 'operator' && t.text === '[') break;
     if (t.kind === 'identifier') {
-      segments.push({ name: t.text, offset: t.offset });
+      segments.push({ name: t.text, offset: t.stOffset });
       continue;
     }
     if (t.kind === 'operator' && t.text === '/') continue;
@@ -239,15 +229,13 @@ function readAttachList(tokens: Token[], openIndex: number): BoxAttachName[] | u
 
   const names: BoxAttachName[] = [];
   for (const [stItemIndex, enItemIndex] of splitTopLevel(tokens, openIndex, closeIndex)) {
-    const aliasIndex = nextNonCommentIndex(tokens, stItemIndex);
-    // 空块（`[a,]` 的尾块）或整块只有注释
-    if (aliasIndex === undefined) continue;
-    const aliasToken = tokens[aliasIndex];
-    // `[1]`、`["a"]` 这类认不出来的写法：宁可漏记，也不乱记
-    if (aliasToken.kind !== 'identifier') continue;
+    // 空块（`[a,]` 的尾块）的起点是 `]`、越界时取不到 token；
+    // `[1]`、`["a"]` 这类认不出来的写法宁可漏记，也不乱记
+    const aliasToken = tokens[stItemIndex];
+    if (aliasToken === undefined || aliasToken.kind !== 'identifier') continue;
     // `...`（附着全部）不是名字：跳过，不能塞进 names（否则上层会以为是"一个叫 ... 的符号"）
     if (aliasToken.text === '...') continue;
-    names.push({ alias: aliasToken.text, source: readAttachSource(tokens, aliasIndex, enItemIndex) });
+    names.push({ alias: aliasToken.text, source: readAttachSource(tokens, stItemIndex, enItemIndex) });
   }
 
   return names;
@@ -264,7 +252,7 @@ function readAttachSource(tokens: Token[], aliasIndex: number, enItemIndex: numb
     const t = tokens[j];
     if (t.kind !== 'operator' || t.text !== '=') continue;
     // 右侧写了名字就用它；没写 / 写坏了（`[g = ]`、`[g = "f"]`）→ 退回别名，两侧同名
-    const source = nextNonComment(tokens, j + 1);
+    const source = tokens[j + 1];
     return source?.kind === 'identifier' ? source.text : aliasToken.text;
   }
   return aliasToken.text; // 没写 `=`

@@ -23,7 +23,7 @@ export interface TopLevelSymbol {
 }
 
 /**
- * 从**已有 token** 里取顶层符号（按出现顺序；同名多次赋值会都出现，调用方取第一个即可）。
+ * 从**已有 token** 里取顶层符号（按出现顺序；同名多次赋值都会出现，调用方取**最后一次** —— R 里后写覆盖）。
  * 切词由调用方负责（provider 切光标文件、parseSourceFile 切依赖文件）。
  *
  * "顶层"靠**括号深度**判断，与缩进无关：只有在深度 0 出现的 `名字 <- ...` / `名字 = ...` 才算。
@@ -43,7 +43,7 @@ export function parseTopLevelSymbols(tokens: Token[]): TopLevelSymbol[] {
 
     if (depth !== 0 || token.kind !== 'identifier' || isHidden(token.text)) continue;
     if (!isAssignOperator(tokens[i + 1])) continue;
-    symbols.push({ name: token.text, offset: token.offset });
+    symbols.push({ name: token.text, offset: token.stOffset });
   }
 
   return symbols;
@@ -101,7 +101,8 @@ export function resolveAttachNameDefinition(
   // 模块文件没被加载（读不出来），跳不了
   if (moduleFile === undefined) return null;
 
-  const symbol = moduleFile.symbols.find((one) => one.name === target.source);
+  // 取最后一次：R 里后写的赋值覆盖前面的（与同文件变量跳转的规则一致）
+  const symbol = moduleFile.symbols.findLast((one) => one.name === target.source);
   // 模块里没有这个名字（例如它是函数体内部的局部变量）
   if (symbol === undefined) return null;
 
@@ -139,7 +140,8 @@ export function resolveModuleMemberDefinition(
   if (moduleFile === undefined) return null;
 
   // 顶层符号在 ctx 组装时就随 parseSourceFile 算好了（每文件一份），这里查缓存、不重解析
-  const symbol = moduleFile.symbols.find((one) => one.name === memberToken.text);
+  // 取最后一次：R 里后写的赋值覆盖前面的（与同文件变量跳转的规则一致）
+  const symbol = moduleFile.symbols.findLast((one) => one.name === memberToken.text);
   // 模块里没有这个顶层名字
   if (symbol === undefined) return null;
 

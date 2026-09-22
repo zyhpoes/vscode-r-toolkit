@@ -85,7 +85,7 @@ describe('parseTopLevelSymbols 取模块的顶层符号', () => {
     expect(namesOf(['box::export()', 'fn <- function() 1'].join('\n'))).toEqual(['fn']);
   });
 
-  it('同名多次赋值 → 都记下来（调用方取第一个作为跳转目标）', () => {
+  it('同名多次赋值 → 都记下来（调用方取最后一次，见下面两个 resolve* 的用例）', () => {
     expect(namesOf(['x <- 1', 'x <- 2'].join('\n'))).toEqual(['x', 'x']);
   });
 
@@ -182,6 +182,22 @@ describe('resolveModuleMemberDefinition 模块$成员 跳转', () => {
       'test.R',
     );
     expect(resolveModuleMemberDefinition(ctx, text.indexOf('.hidden') + 2, schemaBinding())).toBeNull();
+  });
+
+  it('模块里同名多次赋值 → 跳最后一次（R 里后写覆盖）', () => {
+    const text = 'x <- schema$get_label(1)';
+    const ctx = createContext(
+      [
+        { uri: 'test.R', text },
+        {
+          uri: 'schema.R',
+          text: ['get_label <- function(x) 1', 'y <- 2', 'get_label <- function(x) 2'].join('\n'),
+        },
+      ],
+      'test.R',
+    );
+    const site = resolveModuleMemberDefinition(ctx, text.indexOf('get_label') + 1, schemaBinding());
+    expect(site?.line).toBe(2); // 模块文件第 3 行 = 最后一次赋值
   });
 });
 
@@ -335,5 +351,21 @@ describe('resolveAttachNameDefinition 附着清单引入的名字 → 模块里�
   it('光标不在任何标识符上 → 不命中', () => {
     const text = 'x <- FI$new()';
     expect(resolveAttachNameDefinition(ctxOf(text), 1, attachTable())).toBeNull(); // 偏移 1 是空格
+  });
+
+  it('模块里同名多次赋值 → 跳最后一次（R 里后写覆盖）', () => {
+    const text = 'x <- get_label(1)';
+    const ctx = createContext(
+      [
+        { uri: 'test.R', text },
+        {
+          uri: 'field_info.R',
+          text: ['get_label <- function() 1', 'y <- 1', 'get_label <- function() 2'].join('\n'),
+        },
+      ],
+      'test.R',
+    );
+    const site = resolveAttachNameDefinition(ctx, text.indexOf('get_label') + 1, attachTable());
+    expect(site?.line).toBe(2); // 模块文件第 3 行 = 最后一次赋值
   });
 });

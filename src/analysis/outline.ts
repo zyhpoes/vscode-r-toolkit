@@ -116,7 +116,7 @@ function findScopeKeywordOffset(
       tokens[i + 2].text === 'list' &&
       tokens[i + 3]?.kind === 'operator' &&
       tokens[i + 3].text === '(';
-    if (isAssignment && isListCall) return t.offset;
+    if (isAssignment && isListCall) return t.stOffset;
   }
   return undefined;
 }
@@ -128,5 +128,5 @@ function findScopeKeywordOffset(
 function r6CallEndOffset(classDef: R6ClassDef, tokens: Token[]): number {
   const closeToken = tokens[classDef.enIndex];
   if (closeToken === undefined) return classDef.nameOffset;
-  return closeToken.offset + closeToken.text.length;
+  return closeToken.enOffset;
 }

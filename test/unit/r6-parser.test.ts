@@ -122,6 +122,29 @@ describe('parseR6 提取成员', () => {
     const text = 'Person <- R6Class("Person")';
     expect(parseR6(tokenize(text))).toMatchObject([{ name: 'Person', nameOffset: 0, members: [] }]);
   });
+
+  it('成员项前面有注释：成员照常解析（R 里注释等于空白，可以出现在任何位置）', () => {
+    const text =
+      'Person <- R6Class("Person",\n' +
+      '  public = list(\n' +
+      '    # 名字\n' +
+      '    name = NULL,\n' +
+      '    greet = function() "hi"\n' +
+      '  )\n' +
+      ')';
+    const result = parseR6(tokenize(text));
+    expect(result[0].members.map((m) => m.name)).toEqual(['name', 'greet']);
+  });
+
+  it('区名前面有注释：该区的成员照常解析', () => {
+    const text =
+      'Person <- R6Class("Person",\n' +
+      '  # 公开接口\n' +
+      '  public = list(greet = function() "hi")\n' +
+      ')';
+    const result = parseR6(tokenize(text));
+    expect(result[0].members.map((m) => m.name)).toEqual(['greet']);
+  });
 });
 
 describe('parseR6 提取 inherit（父类引用）', () => {

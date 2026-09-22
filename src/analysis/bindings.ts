@@ -34,7 +34,7 @@ export function parseBindings(tokens: Token[]): Binding[] {
     if (lhs?.kind !== 'identifier') continue;
     if (tokens[i - 2]?.text === '$') continue;
 
-    bindings.push({ varName: lhs.text, stIndex: i + 1, offset: lhs.offset });
+    bindings.push({ varName: lhs.text, stIndex: i + 1, offset: lhs.stOffset });
   }
 
   return bindings;

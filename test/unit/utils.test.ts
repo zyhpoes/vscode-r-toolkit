@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { nextNonComment, nextNonCommentIndex, splitTopLevel } from '../../src/parser/utils';
+import { splitTopLevel } from '../../src/parser/utils';
 import { tokenize } from '../../src/parser/tokenizer';
 
 /** 辅助：把切出来的区间还原成原文片段（比堆下标好读，也顺便验证区间是"下标"而非文本） */
@@ -14,32 +14,6 @@ function piecesOf(text: string): string[] {
       .join(' '),
   );
 }
-
-describe('nextNonComment / nextNonCommentIndex 跳过注释', () => {
-  it('前面是注释 → 往后找到第一个非注释 token', () => {
-    const tokens = tokenize('# 注释\nx <- 1');
-    // token 顺序：注释(0) x(1) <-(2) 1(3)
-    expect(nextNonCommentIndex(tokens, 0)).toBe(1);
-    expect(nextNonComment(tokens, 0)?.text).toBe('x');
-  });
-
-  it('连续多条注释 → 一路跳过', () => {
-    const tokens = tokenize('# a\n# b\nx');
-    expect(nextNonComment(tokens, 0)?.text).toBe('x');
-  });
-
-  it('当前位置不是注释 → 原样返回自己', () => {
-    const tokens = tokenize('x # 尾巴');
-    expect(nextNonCommentIndex(tokens, 0)).toBe(0);
-  });
-
-  it('越界 / 到尾 → undefined（不是 -1 或 length 这种非法下标）', () => {
-    const tokens = tokenize('x');
-    expect(nextNonCommentIndex(tokens, 5)).toBeUndefined();
-    expect(nextNonComment(tokens, 5)).toBeUndefined();
-    expect(nextNonCommentIndex(tokenize('# 只有注释'), 0)).toBeUndefined();
-  });
-});
 
 describe('splitTopLevel 按顶层逗号切块', () => {
   it('空括号 → 切出一个空区间', () => {
@@ -89,7 +63,7 @@ describe('splitTopLevel 按顶层逗号切块', () => {
     const pieces = piecesOf('f(a, # 说明\n b)');
     expect(pieces).toHaveLength(2); // 注释没有多切出一块
     expect(pieces[0]).toBe('a');
-    // 第二块里含注释 token（换行注释在原文里属于这一块）——"取名字时跳过注释"是调用方的事（nextNonComment）
-    expect(pieces[1]).toContain('b');
+    // 注释已被 tokenize 丢掉（默认流不含注释），第二块就是 b —— 切块既不因注释多切、也不错位
+    expect(pieces[1]).toBe('b');
   });
 });

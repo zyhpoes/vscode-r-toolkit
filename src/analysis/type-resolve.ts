@@ -9,7 +9,6 @@
  */
 
 import { r6CallTokenRange } from '../parser/r6-parser';
-import { nextNonComment } from '../parser/utils';
 import type { Token } from '../parser/tokenizer';
 import type { TextLines } from '../utils/text';
 import { findLatestBinding, type Binding } from './bindings';
@@ -125,12 +124,11 @@ function resolveVarTypeDFS(
 function isSingleNameRhs(tokens: Token[], lines: TextLines, stIndex: number): boolean {
   const first = tokens[stIndex];
   if (first === undefined || first.kind !== 'identifier') return false;
-  // 下一个非注释 token（注释不参与语句结构）
-  const next = nextNonComment(tokens, stIndex + 1);
+  const next = tokens[stIndex + 1];
   // 右边只有这个名字（文件尾）
   if (next === undefined) return true;
   // 分号分隔的下一句
   if (next.text === ';') return true;
   // 换行了 → 本句到此结束（即使下一行还有代码）
-  return lines.positionAt(next.offset).line !== lines.positionAt(first.offset).line;
+  return lines.positionAt(next.stOffset).line !== lines.positionAt(first.stOffset).line;
 }

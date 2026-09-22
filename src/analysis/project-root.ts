@@ -2,7 +2,7 @@ import * as path from 'path';
 import { isAbsoluteLike, stripTrailingSep } from '../utils/paths';
 import { tokenize } from '../parser/tokenizer';
 import { matchBracket } from '../parser/brackets';
-import { nextNonComment, splitTopLevel } from '../parser/utils';
+import { splitTopLevel } from '../parser/utils';
 
 /** 候选根来源：用户配置 / .Rprofile 的 box.path / VS Code 工作区根 */
 export type RootSource = 'config' | 'boxpath' | 'workspace';
@@ -148,7 +148,7 @@ export function parseBoxPathRoots(rprofileText: string, rprofileDir: string): Ca
       if (tokens[stArg + 1]?.kind !== 'operator' || tokens[stArg + 1].text !== '=') continue;
 
       // 找到 box.path：能识别的字面量就用它，其余（动态表达式 / 值漏写）回落所在目录
-      const valueToken = nextNonComment(tokens, stArg + 2);
+      const valueToken = tokens[stArg + 2];
       if (valueToken?.kind === 'string') {
         const literal = valueToken.text;
         const root = isAbsoluteLike(literal)

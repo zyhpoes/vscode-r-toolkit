@@ -180,7 +180,7 @@ function findClassNameAndOffset(
 
   // 符合R6类的定义
   if (oper?.kind === 'operator' && oper.text === '<-' && name?.kind === 'identifier') {
-    return { name: name.text, nameOffset: name.offset };
+    return { name: name.text, nameOffset: name.stOffset };
   }
   return null;
 }
@@ -268,7 +268,7 @@ function extractInherit(
     if (ref === undefined) return undefined;
 
     // 引号字符串写法：inherit = "A"（内容即父类名）
-    if (ref.kind === 'string') return { kind: 'string', className: ref.text, offset: ref.offset };
+    if (ref.kind === 'string') return { kind: 'string', className: ref.text, offset: ref.stOffset };
 
     // 标识符写法：inherit = A 或 inherit = pkg$A
     if (ref.kind === 'identifier') {
@@ -304,7 +304,7 @@ function extractInherit(
       return {
         kind: isChain ? 'chain' : 'name',
         className: tokens[clsIdx].text,
-        offset: tokens[clsIdx].offset,
+        offset: tokens[clsIdx].stOffset,
       };
     }
 
@@ -351,7 +351,7 @@ function memberName(tokens: Token[], stIndex: number, scope: R6Scope): R6Member 
   // 合法代码里成员项的第一个 token 就是成员名；
   // 只有代码不合法时第一个 token 才不是标识符 —— 这种情况直接返回 null，不处理。
   const t = tokens[stIndex];
-  if (t.kind === 'identifier') return { name: t.text, scope, nameOffset: t.offset };
+  if (t.kind === 'identifier') return { name: t.text, scope, nameOffset: t.stOffset };
   return null;
 }
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { findTokenIndexAt, findWordIndexAt } from '../../src/analysis/cursor';
+import { findWordIndexAt } from '../../src/analysis/cursor';
 import { createContext, type AnalysisContext } from '../../src/analysis/context';
 
 // 辅助：把单文件文本包装成 ctx（当前文件 uri 固定为 test.R）
@@ -41,30 +41,22 @@ describe('findWordIndexAt 找光标下的标识符下标', () => {
     // tokens 依次是：Person(0) $(1) new(2) ((3) )(4)
     expect(findWordIndexAt(ctx, text.indexOf('new') + 1)).toBe(2);
   });
-});
 
-describe('findTokenIndexAt 找光标下的任意 token（不限标识符）', () => {
-  it('光标落在字符串里 → 命中那个 string token', () => {
-    const text = 'box::use("person/utils/x")';
-    const ctx = singleCtx(text);
-    // 字符串 token 的偏移是开引号位置（9），内容占 [10, 24)；光标落在内容里（偏移 15）
-    const token = ctx.cursorFile.tokens[findTokenIndexAt(ctx, 15)];
-    expect(token.kind).toBe('string');
-    expect(token.offset).toBe(9);
-  });
-
-  it('光标落在运算符上 → 也返回下标（与 findWordIndexAt 不同）', () => {
-    const text = 'x <- 42';
-    const ctx = singleCtx(text);
-    const operatorIndex = findTokenIndexAt(ctx, text.indexOf('<-'));
-    expect(ctx.cursorFile.tokens[operatorIndex].kind).toBe('operator');
-    expect(findWordIndexAt(ctx, text.indexOf('<-'))).toBe(-1); // 同一个位置，标识符版不认
-  });
-
-  it('光标在空白处（没有任何 token）→ -1', () => {
+  it('光标在空白处 → -1', () => {
     const text = 'x   <-';
     const ctx = singleCtx(text);
     // 偏移 1..3 是空格：偏移 2 不在任何 token 内
-    expect(findTokenIndexAt(ctx, 2)).toBe(-1);
+    expect(findWordIndexAt(ctx, 2)).toBe(-1);
+  });
+});
+
+describe('token 的区间要覆盖它在原文里的整段（分隔符也算）', () => {
+  // 根因：判定区间以前用 offset + text.length 算，而反引号标识符的 text 是"内容"
+  // （不含反引号），于是 token 尾部会短 2 个字符 —— 点最后两个字符没反应。
+  it('反引号标识符：点在最后一个字符上 → 命中该标识符', () => {
+    const text = 'x <- `my-fn`';
+    const ctx = singleCtx(text);
+    // tokens 依次是：x(0) <-(1) `my-fn`(2)；'my-fn' 的内容占 [6, 11)，最后一个字符 n 在偏移 10
+    expect(findWordIndexAt(ctx, text.indexOf('n`'))).toBe(2);
   });
 });

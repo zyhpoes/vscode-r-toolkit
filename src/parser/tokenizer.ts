@@ -4,7 +4,7 @@
  *
  * 切分规则（按字符类别）：
  *   - 空白：跳过
- *   - #：注释，到行尾
+ *   - #：注释，到行尾（**默认丢弃**，见 keepComment）
  *   - " 或 '：字符串，到配对引号（支持转义）
  *   - 数字 / .数字：数字字面量
  *   - 字母 / _ / . 开头：标识符（含 `反引号标识符`）
@@ -19,15 +19,24 @@ export type TokenKind =
   | 'operator' // 符号：<- $ ( ) { } , 等
   | 'comment'; // 注释：# 到行尾
 
-/** 一个 token：种类 + 文本 + 在原文中的起始偏移量 */
+/**
+ * 一个 token：种类 + 文本 + 原文区间 `[stOffset, enOffset)`（字符偏移，右端不含）。
+ *
+ * `text` 对字符串 / 反引号标识符是**内容**（不含分隔符），长度不等于区间长度 ——
+ * 算"token 占了原文哪一段"一律用区间，别用 `text.length`。
+ */
 export interface Token {
   kind: TokenKind;
   text: string;
-  offset: number;
+  stOffset: number;
+  enOffset: number;
 }
 
-/** 把 R 代码文本切成 token 数组 */
-export function tokenize(text: string): Token[] {
+/**
+ * 把 R 代码文本切成 token 数组。
+ * @param keepComment 是否保留注释 token（默认 false）。
+ */
+export function tokenize(text: string, keepComment = false): Token[] {
   const tokens: Token[] = [];
   let i = 0;
   const n = text.length;
@@ -47,7 +56,9 @@ export function tokenize(text: string): Token[] {
       while (i < n && text[i] !== '\n') {
         i++;
       }
-      tokens.push({ kind: 'comment', text: text.slice(start, i), offset: start });
+      if (keepComment) {
+        tokens.push({ kind: 'comment', text: text.slice(start, i), stOffset: start, enOffset: i });
+      }
       continue;
     }
 
@@ -63,7 +74,13 @@ export function tokenize(text: string): Token[] {
         i++; // 跳到被转义字符之后
       }
       i++; // 跳过结束引号（若没找到配对引号，i 会停在 n，slice 截断即可）
-      tokens.push({ kind: 'string', text: text.slice(start + 1, i - 1), offset: start });
+      tokens.push({
+        kind: 'string',
+        text: text.slice(start + 1, i - 1),
+        stOffset: start,
+        // 未闭合时 i 会走到 n+1，钳回文本末尾
+        enOffset: Math.min(i, n),
+      });
       continue;
     }
 
@@ -74,7 +91,7 @@ export function tokenize(text: string): Token[] {
       while (i < n && (isDigit(text[i]) || text[i] === '.')) {
         i++;
       }
-      tokens.push({ kind: 'number', text: text.slice(start, i), offset: start });
+      tokens.push({ kind: 'number', text: text.slice(start, i), stOffset: start, enOffset: i });
       continue;
     }
 
@@ -87,13 +104,19 @@ export function tokenize(text: string): Token[] {
           i++;
         }
         i++; // 跳过结束反引号
-        tokens.push({ kind: 'identifier', text: text.slice(start + 1, i - 1), offset: start });
+        tokens.push({
+          kind: 'identifier',
+          text: text.slice(start + 1, i - 1),
+          stOffset: start,
+          // 未闭合时 i 会走到 n+1，钳回文本末尾
+          enOffset: Math.min(i, n),
+        });
       } else {
         const start = i;
         while (i < n && isIdentifierPart(text[i])) {
           i++;
         }
-        tokens.push({ kind: 'identifier', text: text.slice(start, i), offset: start });
+        tokens.push({ kind: 'identifier', text: text.slice(start, i), stOffset: start, enOffset: i });
       }
       continue;
     }
@@ -101,7 +124,7 @@ export function tokenize(text: string): Token[] {
     // 运算符：按"最长匹配"吃（<-、<<-、->>、%>% 等）
     const start = i;
     i += operatorLength(text, i);
-    tokens.push({ kind: 'operator', text: text.slice(start, i), offset: start });
+    tokens.push({ kind: 'operator', text: text.slice(start, i), stOffset: start, enOffset: i });
   }
 
   return tokens;

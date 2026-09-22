@@ -44,12 +44,15 @@ describe('tokenize 基本切分', () => {
     ]);
   });
 
-  it('注释里的 R6Class 不算数', () => {
-    const tokens = tokenize('# R6Class("假的")');
-    // 关键断言 1：整行只产生 1 个 token 且是注释 —— 里面的 R6Class 没有被切出来
+  it('注释里的 R6Class 不算数（默认丢弃注释）', () => {
+    // 注释不是代码 token：默认流里没有它，解析器因此永远不必考虑注释
+    expect(tokenize('# R6Class("假的")')).toEqual([]);
+  });
+
+  it('keepComment = true 时保留注释 token，内容原文照存（没被截断）', () => {
+    const tokens = tokenize('# R6Class("假的")', true);
     expect(tokens).toHaveLength(1);
     expect(tokens[0].kind).toBe('comment');
-    // 关键断言 2：注释内容被完整保留（原文照存，没被截断）
     expect(tokens[0].text).toBe('# R6Class("假的")');
   });
 
@@ -99,9 +102,9 @@ describe('tokenize 基本切分', () => {
 });
 
 describe('tokenize 位置与边界', () => {
-  it('token 的 offset 指向原文中的起始位置', () => {
+  it('token 的 stOffset 指向原文中的起始位置', () => {
     const tokens = tokenize('Person <- R6Class');
-    expect(tokens.map((t) => t.offset)).toEqual([0, 7, 10]);
+    expect(tokens.map((t) => t.stOffset)).toEqual([0, 7, 10]);
   });
 
   it('空文本 → 空数组', () => {
@@ -110,5 +113,35 @@ describe('tokenize 位置与边界', () => {
 
   it('纯空白 → 空数组', () => {
     expect(tokenize('  \t\n  ')).toEqual([]);
+  });
+});
+
+describe('token 的原文区间 [stOffset, enOffset)', () => {
+  // 这两条盯住"区间 = 原文那一段"这个事实：字符串 / 反引号标识符的 text 不含分隔符，
+  // 所以谁都不能用长度推算区间（曾经就这么错，导致点末尾两字符没反应）。
+  const text = 'x <- "a b" # 注释\n`weird name` <- 1.5';
+
+  it('区间切出来的就是原文那一段（字符串与反引号带分隔符）', () => {
+    const tokens = tokenize(text, true);
+    expect(tokens.map((t) => text.slice(t.stOffset, t.enOffset))).toEqual([
+      'x',
+      '<-',
+      '"a b"',
+      '# 注释',
+      '`weird name`',
+      '<-',
+      '1.5',
+    ]);
+  });
+
+  it('区间非空、不越界、彼此不重叠（半开区间可以相邻）', () => {
+    const tokens = tokenize(text, true);
+    for (const t of tokens) {
+      expect(t.enOffset).toBeGreaterThan(t.stOffset);
+      expect(t.enOffset).toBeLessThanOrEqual(text.length);
+    }
+    for (let i = 1; i < tokens.length; i++) {
+      expect(tokens[i].stOffset).toBeGreaterThanOrEqual(tokens[i - 1].enOffset);
+    }
   });
 });
