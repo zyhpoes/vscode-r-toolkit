@@ -1,18 +1,20 @@
 /**
- * 变量类型解析：查"变量 varName 此刻指向什么"（类 / 函数 / 追不到）。
+ * 变量类型解析：查"变量 varName 此刻指向什么"（类生成器 / 实例 / 函数 / 追不到）。
  * 沿赋值链做 DFS：每一层看"这条赋值右侧是什么"——
  *   1. R6Class 调用（裸 R6Class 或 R6::R6Class）→ 变量本身是类，类名 = 左侧变量名
- *   2. 其他形状交给求值器（evaluateRhs）判断（类 / 函数）
+ *   2. 其他形状交给求值器（evaluateRhs）判断（类生成器 / 实例 / 函数）
  *   3. 求值器认不出、且右侧是单个变量名 → 是别名（p <- q），沿链继续 DFS 追 q
  * DFS 安全性：visited 防环 + 深度上限，杜绝死循环 / 栈溢出。
  * 纯逻辑：不依赖 vscode，可在纯 Node 中测试。
  */
 
 import { r6CallTokenRange } from '../parser/r6-parser';
+import type { R6Member } from '../parser/r6-parser';
 import type { Token } from '../parser/tokenizer';
 import type { TextLines } from '../utils/text';
 import { findLatestBinding, type Binding } from './bindings';
 import { evaluateRhs, type NameResolver } from './rhs-eval';
+import type { ClassWithFile } from './definitions';
 import type { AnalysisContext } from './context';
 
 /** 别名链最大追踪深度（visited 已防环，这是第二道保险） */
@@ -20,9 +22,28 @@ const MAX_TRACE_DEPTH = 100;
 
 /** 变量最终指向什么（追到源头的结果） */
 export type ResolvedType =
-  | { kind: 'class'; className: string } // 变量是某类的实例 / 类本身
+  | { kind: 'class'; className: string } // 类生成器本身（P <- Person）
+  | { kind: 'instance'; className: string } // 实例（p <- Person$new()）
   | { kind: 'function' } // 变量是函数
   | null; // 追不到（环 / 未知 / 该位置前没赋值）
+
+/**
+ * 成员**右值**的类型：`key_id = FieldInfo` → class FieldInfo（实例则由 `$new()` 判出）。
+ * 用成员**所在文件**的 token 求值 —— 继承来的成员照样算得出（用光标文件会取错位置）。
+ */
+export function memberValueType(
+  ctx: AnalysisContext,
+  node: ClassWithFile,
+  member: R6Member,
+  cursorOffset: number,
+): ResolvedType {
+  if (member.stIndex === undefined) return null;
+  const type = evaluateRhs(node.parsed.tokens, member.stIndex, {
+    names: ctx.resolver,
+    cursorOffset,
+  });
+  return type.kind === 'unknown' ? null : type;
+}
 
 /**
  * 查 varName 在 cursorOffset 位置指向的类型。
@@ -57,7 +78,7 @@ export function resolveVarType(
  *   第 0 层 resolveVarTypeDFS(p)
  *     → 找到 p 的赋值（p <- q），右侧 q 是别名
  *     → 递归第 1 层 resolveVarTypeDFS(q)
- *         → 找到 q 的赋值（q <- Person$new()），右侧是类 → 返回 class Person
+ *         → 找到 q 的赋值（q <- Person$new()），右侧是 $new() → 返回 instance Person
  *     → 第 0 层把第 1 层的结论原样返回
  *
  * @param visited 记录已追过的变量名（防环：重复出现说明成环，返回 null）
@@ -102,6 +123,7 @@ function resolveVarTypeDFS(
     cursorOffset,
   });
   if (evalResult.kind === 'class') return { kind: 'class', className: evalResult.className };
+  if (evalResult.kind === 'instance') return { kind: 'instance', className: evalResult.className };
   if (evalResult.kind === 'function') return { kind: 'function' };
 
   // 本层判断不了（unknown）→ 若右侧是"单个变量名"（p <- q），可能是别名，

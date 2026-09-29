@@ -1,9 +1,9 @@
 /**
  * RHS 表达式类型求值（重构核心）：给定"赋值右边"的 token 起点，
- * 求值它指向什么（类 / 函数 / 未知）。支持：
- *   Person            → class Person（Person 在类清单）
- *   person$Person     → class Person（$ 链终点是类）
- *   Person$new()      → class Person（$new 构造，v1 不分实例/类）
+ * 求值它指向什么（类生成器 / 实例 / 函数 / 未知）。支持：
+ *   Person            → class Person（类生成器本身）
+ *   person$Person     → class Person（$ 链终点是类，仍是生成器）
+ *   Person$new()      → instance Person（$new 构造出实例）
  *   function(...)     → function
  *   其他 / 漏写右边   → unknown
  * 纯逻辑：不依赖 vscode。
@@ -44,7 +44,8 @@ export interface EvalEnv {
 
 /** RHS 求值结果：指向什么 */
 export type RhsType =
-  | { kind: 'class'; className: string } // 指向某类（类本身或实例，v1 不分）
+  | { kind: 'class'; className: string } // 类生成器本身（Person / person$Person）
+  | { kind: 'instance'; className: string } // 实例（Person$new()）—— 两者能点的名字不同
   | { kind: 'function' } // 指向函数
   | { kind: 'unknown' }; // 求不出（表达式/字面量/漏写）
 
@@ -80,8 +81,8 @@ export function evaluateRhs(tokens: Token[], stRhs: number, env: EvalEnv): RhsTy
 
 /**
  * 求值 $ 链：person$Person / Person$new() / person$Person$new()。
- * 规则：链里发现 `new(` → 类名 = new 前一个名字；
- *       没有 new(      → 类名 = 链上最后一个名字（查它是不是类）。
+ * 规则：链里发现 `new(` → 类名 = new 前一个名字，结果是**实例**；
+ *       没有 new(      → 类名 = 链上最后一个名字（查它是不是类），结果是**类生成器**本身。
  */
 function evaluateDollarChain(tokens: Token[], stChain: number, env: EvalEnv): RhsType {
   // 沿链收集名字，并记录 new( 出现的位置
@@ -103,10 +104,10 @@ function evaluateDollarChain(tokens: Token[], stChain: number, env: EvalEnv): Rh
   }
 
   // 定类名：有 new( 用 new 前一个名字，否则用最后一个名字
-  const className =
-    newNameIdx > 0 ? chainNames[newNameIdx - 1] : chainNames[chainNames.length - 1];
+  const viaNew = newNameIdx > 0;
+  const className = viaNew ? chainNames[newNameIdx - 1] : chainNames[chainNames.length - 1];
 
-  // 类名必须是"真类"才返回 class，否则 unknown
-  if (env.names.isClass(className)) return { kind: 'class', className };
-  return { kind: 'unknown' };
+  // 类名必须是"真类"才算数；`new(` 构造出来的是实例，否则是类生成器本身
+  if (!env.names.isClass(className)) return { kind: 'unknown' };
+  return viaNew ? { kind: 'instance', className } : { kind: 'class', className };
 }

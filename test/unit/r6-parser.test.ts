@@ -81,6 +81,25 @@ describe('parseR6 提取成员', () => {
     ]);
   });
 
+  it('stIndex 指向成员右值的第一个 token', () => {
+    const text =
+      'Person <- R6Class("Person",\n' +
+      '  public = list(greet = function() "hi", name = NULL)\n' +
+      ')';
+    const tokens = tokenize(text);
+    const members = parseR6(tokens)[0].members;
+    const indexOf = (ptr: string) => tokens.findIndex((t) => t.text === ptr);
+
+    expect(members[0].stIndex).toBe(indexOf('function')); // greet = function() "hi"
+    expect(members[1].stIndex).toBe(indexOf('NULL')); // name = NULL
+  });
+
+  it('成员项没写 `=`（list(x)）→ stIndex 为 undefined', () => {
+    const members = parseR6(tokenize('Person <- R6Class("Person", public = list(x))'))[0].members;
+    expect(members).toHaveLength(1);
+    expect(members[0].stIndex).toBeUndefined();
+  });
+
   it('成员项的 [ ] 索引里的逗号不会被误切（matrix(...)[1, ]）', () => {
     const text =
       'Person <- R6Class("Person",\n' +

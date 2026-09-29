@@ -7,6 +7,7 @@
 // vscode 模块是 VS Code 运行时注入的（打包时 external，不编译进产物）。
 // 现在要用运行时的 API（状态栏、注册 provider），所以用普通导入。
 import * as vscode from 'vscode';
+import { R6CompletionProvider } from './providers/completion';
 import { R6DefinitionProvider } from './providers/definition';
 import { R6DocumentSymbolProvider } from './providers/symbols';
 
@@ -32,6 +33,12 @@ export function activate(context: vscode.ExtensionContext): void {
   // 只作用于 R 文件，不碰其他语言 —— 与 vscode-R 共存的关键。
   context.subscriptions.push(
     vscode.languages.registerDefinitionProvider('r', new R6DefinitionProvider(output)),
+  );
+
+  // 给 R 语言注册"成员补全"能力：`p$` / `self$` / `类名$` 之后列出 R6 成员。
+  // 触发字符只给 `$`：`::` 的包名补全还没做，先不触发（免得弹个空列表）。
+  context.subscriptions.push(
+    vscode.languages.registerCompletionItemProvider('r', new R6CompletionProvider(), '$'),
   );
 
   // 给 R 语言注册"文档大纲"能力：类 → 区 → 成员。

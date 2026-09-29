@@ -30,10 +30,15 @@ function evalVar(text: string, varName: string): ReturnType<typeof evaluateRhs> 
 }
 
 describe('evaluateRhs 赋值右边求值', () => {
-  it('Person$new() → class Person', () => {
+  it('Person$new() → instance Person', () => {
     // 类定义在同一文本里，让 parseR6 能认出 Person
     const text = 'Person <- R6Class("Person")\np <- Person$new()';
-    expect(evalVar(text, 'p')).toEqual({ kind: 'class', className: 'Person' });
+    expect(evalVar(text, 'p')).toEqual({ kind: 'instance', className: 'Person' });
+  });
+
+  it('模块前缀 + new：person$Person$new() → instance Person', () => {
+    const text = 'Person <- R6Class("Person")\np <- person$Person$new()';
+    expect(evalVar(text, 'p')).toEqual({ kind: 'instance', className: 'Person' });
   });
 
   it('Person（类名本身）→ class Person', () => {

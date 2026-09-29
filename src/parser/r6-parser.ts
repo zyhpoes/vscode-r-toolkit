@@ -16,11 +16,14 @@ import { splitTopLevel } from './utils';
 /** 成员所属的区 */
 export type R6Scope = 'public' | 'private' | 'active';
 
-/** 一个成员：名字 + 属于哪个区 + 名字在原文中的偏移（跳转目标） */
+/** 一个成员：名字 + 属于哪个区 + 位置（跳转目标 + 右值起点） */
 export interface R6Member {
   name: string;
   scope: R6Scope;
+  /** 名字在原文中的偏移（跳转目标） */
   nameOffset: number;
+  // 成员**右值**第一个 token 的下标。
+  stIndex: number | undefined;
 }
 
 /** 一个识别出的 R6 类定义：名字 + 名字偏移 + 成员清单 + 调用范围（token 下标） */
@@ -43,6 +46,7 @@ export interface R6ClassDef {
    *    {scope: 'private', name: 'age', nameOffset: 95 },
    *    {scope: 'active', name: 'age', nameOffset: 122 }
    * ]
+   * （stIndex 未列）
    */
   members: R6Member[];
 
@@ -351,8 +355,18 @@ function memberName(tokens: Token[], stIndex: number, scope: R6Scope): R6Member 
   // 合法代码里成员项的第一个 token 就是成员名；
   // 只有代码不合法时第一个 token 才不是标识符 —— 这种情况直接返回 null，不处理。
   const t = tokens[stIndex];
-  if (t.kind === 'identifier') return { name: t.text, scope, nameOffset: t.stOffset };
-  return null;
+  if (t.kind !== 'identifier') return null;
+
+  // `名字 = 右值`：右值从 `=` 之后那个 token 开始（成员类型推断要用它的下标）
+  const assign = tokens[stIndex + 1];
+  const hasAssign = assign?.kind === 'operator' && assign.text === '=';
+
+  return {
+    name: t.text,
+    scope,
+    nameOffset: t.stOffset,
+    stIndex: hasAssign ? stIndex + 2 : undefined,
+  };
 }
 
 /** 判断标识符文本是否是 R6 的区名；是则返回区名，否则返回 null */

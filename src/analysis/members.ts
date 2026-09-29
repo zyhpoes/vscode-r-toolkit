@@ -10,15 +10,56 @@
  *   类名$ / 实例变量$   按名字或类型定位类，查 public/active（含继承来的）
  */
 
-import type { R6Scope } from '../parser/r6-parser';
+import type { R6Member, R6Scope } from '../parser/r6-parser';
 import type { AnalysisContext } from './context';
 import { definitionSiteAt, findClassAcrossFiles, type ClassWithFile, type DefinitionSite } from './definitions';
 import { findHierarchyMember } from './inheritance';
-import { resolveVarType } from './type-resolve';
+import { resolveVarType, memberValueType } from './type-resolve';
 import { findWordIndexAt } from './cursor';
 
-/** 对外可见的区：self$/类名$/实例$/super$ 都只能看到这两类（private 外面看不见） */
-const PUBLIC_VISIBLE: R6Scope[] = ['public', 'active'];
+/** 对外可见的区：self$/类名$/实例$/super$ 都只能看到这两类（private 外面看不见）。补全共用 */
+export const PUBLIC_VISIBLE: R6Scope[] = ['public', 'active'];
+
+/**
+ * 类生成器自带的槽（`类名$` 的候选集；**不含 `new`** —— 它由 parser 的 synthetic 提供，
+ * 因为 `new` 还带"跳到 initialize"这层身份，放在一处定义才不会漂；万一将来有人把这行
+ * 补进表里，generatorSlotCandidates 有去重兜住）。
+ *
+ * 实测（R6 2.6.1）：名单取自 `ls(R6Class(...))`，按 `ls()` 原样顺序（字母序）；
+ * 行尾注的类型/签名也是实测的（函数用 `deparse(args(f))` 打印）。
+ * 口径：以 `ls()` 默认输出为准 —— 点开头的名字（`.__enclos_env__` 等）不算。
+ * 有几个槽的类型会随内容变：没写 `inherit` 时它是 `NULL`，没有私有方法时 `private_methods` 是 `NULL`。
+ * 复测方法（R6 升级后照此核对）：
+ *   Model <- R6Class("Model", public = list(greet = function() 1, v = 1))
+ *   ls(Model)                 # 应当就是下面这 24 个 + new
+ *   is.function(Model$greet)  # 实测 FALSE：生成器上取不到用户成员
+ */
+export const R6_GENERATOR_SLOTS: string[] = [
+  'active',           // 本类 active 绑定的清单（列表）
+  'class',            // R6Class 的 class 参数：是否给实例加 class 属性（逻辑值）
+  'classname',        // 类名（字符串）
+  'clone_method',     // clone 的实现 function (deep = FALSE)；实例上的 clone 就是它
+  'cloneable',        // R6Class 的 cloneable 参数：能否 clone（逻辑值）
+  'debug',            // 打开某个方法的调试 function (name)
+  'debug_names',      // 当前处于调试的方法名（字符向量）
+  'get_inherit',      // 取父类生成器 function ()
+  'has_private',      // 本类有没有 private 区 function ()
+  'inherit',          // 父类生成器（本类没写 inherit 时是 NULL）
+  'is_locked',        // 实例是否已被 lock function ()
+  'lock',             // 锁住实例，之后不能再加成员 function ()
+  'lock_class',       // R6Class 的 lock_class 参数（逻辑值）
+  'lock_objects',     // R6Class 的 lock_objects 参数：实例能否新增成员（逻辑值）
+  'parent_env',       // 生成器的父环境（environment）
+  'portable',         // R6Class 的 portable 参数（逻辑值）
+  'private_fields',   // 私有字段清单（列表）
+  'private_methods',  // 私有方法清单（没有私有方法时是 NULL）
+  'public_fields',    // 公开字段清单（列表）
+  'public_methods',   // 公开方法清单（列表）
+  'self',             // 指向生成器自己（R6ClassGenerator）
+  'set',              // 动态加成员 function (which = NULL, name = NULL, value, overwrite = FALSE)
+  'undebug',          // 关掉某个方法的调试 function (name)
+  'unlock',           // 解锁 function ()
+];
 
 /**
  * 解析光标处的成员定义。
@@ -93,8 +134,9 @@ export function resolveMemberDefinition(
 /**
  * 反查"光标所在类"：self/private/super 写在方法体里，
  * 方法体在类的 R6Class 调用范围内 → 光标落在哪个类范围里，就是哪个类。
+ * （跳转与补全共用；补全传的是容器名那个 token 的下标）
  */
-function containingClass(ctx: AnalysisContext, wordIdx: number): ClassWithFile | undefined {
+export function containingClass(ctx: AnalysisContext, wordIdx: number): ClassWithFile | undefined {
   const classDef = ctx.cursorFile.classes.find(
     (c) => c.stIndex <= wordIdx && wordIdx <= c.enIndex,
   );
@@ -102,23 +144,135 @@ function containingClass(ctx: AnalysisContext, wordIdx: number): ClassWithFile |
   return { classDef, parsed: ctx.cursorFile };
 }
 
+/** 容器的"可点范围"：目标类 + 哪些区可见 + 继承链是否含起点 + 是否只看本类 */
+export interface ContainerScope {
+  target: ClassWithFile;
+  scopes: R6Scope[];
+  includeStart: boolean;
+  /** 只看本类、不沿继承链走（`private$` 专用：R6 里 private 不随继承可见） */
+  ownOnly: boolean;
+}
+
+/** 容器类型：生成器（`类名$` 出槽）还是实例（`实例$` 出成员）—— 两者能点的名字不同 */
+export interface ContainerType extends ContainerScope {
+  kind: 'generator' | 'instance';
+}
+
+/** `a$b$c$` 的链：段名（含容器那一段）+ 链头那个 token 的下标（关键字链头要用它反查所在类） */
+export interface MemberChain {
+  names: string[];
+  headIndex: number;
+}
+
 /**
- * 类名$ / 实例变量$ 的目标类定位，分两步：
- *   Person$greet → Person 本身就是已知类名，直接命中；
- *   p$greet       → p 不是类名，沿赋值链推断类型（p <- Person$new() → Person）。
+ * 名字 → 目标类 + 它是生成器还是实例。
+ *   Person$greet  → Person 本身是类名 → 生成器
+ *   P <- Person   → 变量值是类生成器 → 生成器
+ *   p <- Person$new() → 变量值是实例 → 实例
  */
-function resolveNamedTarget(
+function classTargetOfName(
+  ctx: AnalysisContext,
+  name: string,
+  cursorOffset: number,
+): { kind: 'generator' | 'instance'; target: ClassWithFile } | undefined {
+  const asClass = findClassAcrossFiles(ctx.parsed, name);
+  if (asClass !== undefined) return { kind: 'generator', target: asClass };
+
+  const type = resolveVarType(ctx, name, cursorOffset);
+  if (type === null || (type.kind !== 'class' && type.kind !== 'instance')) return undefined;
+  const target = findClassAcrossFiles(ctx.parsed, type.className);
+  if (target === undefined) return undefined;
+  return { kind: type.kind === 'class' ? 'generator' : 'instance', target };
+}
+
+/**
+ * 类名$ / 实例变量$ 的目标类定位（跳转用 —— 它不看 kind，补全走 resolveContainerType）。
+ */
+export function resolveNamedTarget(
   ctx: AnalysisContext,
   name: string,
   cursorOffset: number,
 ): ClassWithFile | undefined {
-  const asClass = findClassAcrossFiles(ctx.parsed, name);
-  if (asClass !== undefined) return asClass;
-  const type = resolveVarType(ctx, name, cursorOffset);
-  if (type !== null && type.kind === 'class') {
-    return findClassAcrossFiles(ctx.parsed, type.className);
+  return classTargetOfName(ctx, name, cursorOffset)?.target;
+}
+
+/**
+ * 容器（单段名字）→ 类型 + 可点范围。关键字容器靠"光标在哪个类里"解析，名字容器靠查类表/赋值链。
+ */
+export function resolveContainerType(
+  ctx: AnalysisContext,
+  container: string,
+  containerIndex: number,
+  cursorOffset: number,
+): ContainerType | undefined {
+  // self / private / super 不是名字：只能写在方法体里 → 反查光标所在类
+  if (container === 'self' || container === 'private' || container === 'super') {
+    const holder = containingClass(ctx, containerIndex);
+    if (holder === undefined) return undefined;
+    return {
+      kind: 'instance',
+      target: holder,
+      scopes: container === 'private' ? ['private'] : PUBLIC_VISIBLE,
+      includeStart: container !== 'super',
+      ownOnly: container === 'private',
+    };
   }
-  return undefined;
+
+  const hit = classTargetOfName(ctx, container, cursorOffset);
+  if (hit === undefined) return undefined;
+  return { ...hit, scopes: PUBLIC_VISIBLE, includeStart: true, ownOnly: false };
+}
+
+/**
+ * 链式容器 `a$b$c$` → 终点类型。
+ * 链是"一条线"、每段只吃一个 token，不需要防环 / 深度上限（与别名链的 DFS 不同），所以用循环。
+ * 任何一层解析不出来 → undefined（调用方退回"只解析最后一段"）。
+ */
+export function resolveChainType(
+  ctx: AnalysisContext,
+  chain: MemberChain,
+  cursorOffset: number,
+): ContainerType | undefined {
+  const head = resolveContainerType(ctx, chain.names[0], chain.headIndex, cursorOffset);
+  if (head === undefined) return undefined;
+
+  let current = head;
+  // 链头那套可见性（private 只看本类 / super 从父类起算）只作用于**链头这一次**查找；
+  // 往后的每段都由上一段的类型决定，一律按实例默认可见性。
+  for (let i = 1; i < chain.names.length; i++) {
+    const name = chain.names[i];
+    const hit = current.ownOnly
+      ? ownMember(current.target, name, current.scopes)
+      : findHierarchyMember(ctx.parsed, current.target, name, current.scopes, current.includeStart);
+    if (hit === null) return undefined;
+
+    const type = memberValueType(ctx, hit.node, hit.member, cursorOffset);
+    // 函数（或推不出类型）没有可点的成员 → 断链
+    if (type === null || type.kind === 'function') return undefined;
+
+    const target = findClassAcrossFiles(ctx.parsed, type.className);
+    if (target === undefined) return undefined;
+
+    current = {
+      kind: type.kind === 'class' ? 'generator' : 'instance',
+      target,
+      scopes: PUBLIC_VISIBLE,
+      includeStart: true,
+      ownOnly: false,
+    };
+  }
+
+  return current;
+}
+
+/** 只在本类里找成员（不沿继承链）—— private$ 那一支用 */
+function ownMember(
+  target: ClassWithFile,
+  name: string,
+  scopes: R6Scope[],
+): { node: ClassWithFile; member: R6Member } | null {
+  const member = target.classDef.members.find((m) => m.name === name && scopes.includes(m.scope));
+  return member === undefined ? null : { node: target, member };
 }
 
 /** 合成成员兜底：new 是 R6 自动生成的，每个类有自己的一份（指向本类 initialize 或类定义） */
