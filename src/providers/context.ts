@@ -45,9 +45,11 @@ export interface QueryInput {
 }
 
 /**
- * 装配一次查询的原料。
- * 光标文件切一次词：解析导入、建 ctx 都用这一份（切 R 源文件只有这里与 parseSourceFile）。
- * @param output 诊断输出通道；不传就静默（补全每次按键都调，不能刷面板）
+ * 把"当前文档 + 光标位置"加工成一次查询所需的普通对象（`QueryInput`，不含 vscode 对象）：
+ * 切词、解析 box 导入、读依赖文件、每文件解析一次、把行列换算成字符偏移（顺序见文件头）。
+ * 补全与跳转共用这一条管线，只此一份；这里是唯一的读盘处 ——
+ * 补全每按一次键就跑一遍，成本都在这儿。
+ * @param output 诊断输出通道；不传就静默（补全不传：否则每按键都会往面板写行）
  */
 export async function buildQueryInput(
   document: vscode.TextDocument,
@@ -69,12 +71,12 @@ export async function buildQueryInput(
   const files = dedupeFiles([{ uri, text }, ...boxModules.files]);
 
   // 每个文件解析一次；光标文件那份**复用上面切好的 token**（不再切第二遍）
-  const parsed = files.map((file) =>
+  const parsedFiles = files.map((file) =>
     parseSourceFile(file, file.uri === uri ? cursorTokens : undefined),
   );
 
   // 组装分析上下文：只做"校验 + 建聚合索引"，不解析（解析已在上面完成）
-  const ctx = createContextFromParsed(parsed, uri);
+  const ctx = createContextFromParsed(parsedFiles, uri);
 
   // 行索引用 ctx 里那份，不另建
   const cursorOffset = ctx.cursorFile.lines.offsetAt(position.line, position.character);

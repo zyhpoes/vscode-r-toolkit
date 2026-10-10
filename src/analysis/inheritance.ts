@@ -22,13 +22,13 @@ import { findClassAcrossFiles, type ClassWithFile } from './definitions';
  * 没写 inherit / 父类不在已解析清单里 → null。
  */
 export function resolveParentNode(
-  parsed: ParsedSourceFile[],
+  parsedFiles: ParsedSourceFile[],
   node: ClassWithFile,
 ): ClassWithFile | null {
   const inherit = node.classDef.inherit;
   if (inherit === undefined) return null;
   // ?? null：findClassAcrossFiles 找不到返回 undefined，对外统一返回 null
-  return findClassAcrossFiles(parsed, inherit.className) ?? null;
+  return findClassAcrossFiles(parsedFiles, inherit.className) ?? null;
 }
 
 /** 类身份（防环用）：文件 uri + 类名（同名不同文件是不同类） */
@@ -38,21 +38,21 @@ function nodeKey(node: ClassWithFile): string {
 
 /**
  * 从 start 沿继承链向上收集节点（先近后远）。
- * @param includeStart 是否包含起点本身（self$/类名$/实例$ 含，super$ 不含）
+ * @param isSuper 是不是 `super$` 视角：true = 从父类起算（不含本类），false = 含本类
  * 防环：visited 记已走过的节点，成环时截断 —— 不会死循环
  */
 export function collectHierarchy(
-  parsed: ParsedSourceFile[],
+  parsedFiles: ParsedSourceFile[],
   start: ClassWithFile,
-  includeStart: boolean,
+  isSuper: boolean,
 ): ClassWithFile[] {
   const chain: ClassWithFile[] = [];
   const visited = new Set<string>();
-  let cur: ClassWithFile | null = includeStart ? start : resolveParentNode(parsed, start);
+  let cur: ClassWithFile | null = isSuper ? resolveParentNode(parsedFiles, start) : start;
   while (cur !== null && !visited.has(nodeKey(cur))) {
     visited.add(nodeKey(cur));
     chain.push(cur);
-    cur = resolveParentNode(parsed, cur);
+    cur = resolveParentNode(parsedFiles, cur);
   }
   return chain;
 }
@@ -62,13 +62,13 @@ export function collectHierarchy(
  * 链上都没有 → null。
  */
 export function findHierarchyMember(
-  parsed: ParsedSourceFile[],
+  parsedFiles: ParsedSourceFile[],
   start: ClassWithFile,
   memberName: string,
   scopes: R6Scope[],
-  includeStart: boolean,
+  isSuper: boolean,
 ): { node: ClassWithFile; member: R6Member } | null {
-  for (const node of collectHierarchy(parsed, start, includeStart)) {
+  for (const node of collectHierarchy(parsedFiles, start, isSuper)) {
     const member = node.classDef.members.find(
       (m) => m.name === memberName && scopes.includes(m.scope),
     );

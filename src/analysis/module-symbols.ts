@@ -97,7 +97,7 @@ export function resolveAttachNameDefinition(
   const target = attachByName.get(ctx.cursorFile.tokens[wordIndex].text);
   if (target === undefined) return null;
 
-  const moduleFile = ctx.parsed.find((p) => p.file.uri === target.moduleUri);
+  const moduleFile = ctx.parsedFiles.find((p) => p.file.uri === target.moduleUri);
   // 模块文件没被加载（读不出来），跳不了
   if (moduleFile === undefined) return null;
 
@@ -135,7 +135,7 @@ export function resolveModuleMemberDefinition(
   // 这个绑定名不是本文件的 box 模块（可能是 R6 类名等）
   if (moduleUri === undefined) return null;
 
-  const moduleFile = ctx.parsed.find((parsed) => parsed.file.uri === moduleUri);
+  const moduleFile = ctx.parsedFiles.find((parsed) => parsed.file.uri === moduleUri);
   // 模块文件没被加载（读不出来），跳不了
   if (moduleFile === undefined) return null;
 

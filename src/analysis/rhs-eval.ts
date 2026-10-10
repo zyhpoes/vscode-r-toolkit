@@ -44,7 +44,7 @@ export interface EvalEnv {
 
 /** RHS 求值结果：指向什么 */
 export type RhsType =
-  | { kind: 'class'; className: string } // 类生成器本身（Person / person$Person）
+  | { kind: 'generator'; className: string } // 类生成器本身（Person / person$Person）
   | { kind: 'instance'; className: string } // 实例（Person$new()）—— 两者能点的名字不同
   | { kind: 'function' } // 指向函数
   | { kind: 'unknown' }; // 求不出（表达式/字面量/漏写）
@@ -70,7 +70,7 @@ export function evaluateRhs(tokens: Token[], stRhs: number, env: EvalEnv): RhsTy
       return evaluateDollarChain(tokens, stRhs, env);
     }
     // 单名字：先查是不是类，再查是不是函数，都不是 → unknown
-    if (env.names.isClass(first.text)) return { kind: 'class', className: first.text };
+    if (env.names.isClass(first.text)) return { kind: 'generator', className: first.text };
     if (env.names.isFunction(first.text)) return { kind: 'function' };
     return { kind: 'unknown' };
   }
@@ -109,5 +109,5 @@ function evaluateDollarChain(tokens: Token[], stChain: number, env: EvalEnv): Rh
 
   // 类名必须是"真类"才算数；`new(` 构造出来的是实例，否则是类生成器本身
   if (!env.names.isClass(className)) return { kind: 'unknown' };
-  return viaNew ? { kind: 'instance', className } : { kind: 'class', className };
+  return viaNew ? { kind: 'instance', className } : { kind: 'generator', className };
 }

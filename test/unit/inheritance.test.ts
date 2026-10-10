@@ -79,7 +79,7 @@ describe('collectHierarchy 收集继承链', () => {
   it('含起点：Puppy → [Puppy, Dog, Animal]（先近后远）', () => {
     const { parsed } = hierarchyParsed();
     const puppy = nodeOf(parsed, 'Puppy');
-    expect(collectHierarchy(parsed, puppy, true).map((n) => n.classDef.name)).toEqual([
+    expect(collectHierarchy(parsed, puppy, false).map((n) => n.classDef.name)).toEqual([
       'Puppy',
       'Dog',
       'Animal',
@@ -89,7 +89,7 @@ describe('collectHierarchy 收集继承链', () => {
   it('不含起点：Puppy → [Dog, Animal]（super$ 视角）', () => {
     const { parsed } = hierarchyParsed();
     const puppy = nodeOf(parsed, 'Puppy');
-    expect(collectHierarchy(parsed, puppy, false).map((n) => n.classDef.name)).toEqual([
+    expect(collectHierarchy(parsed, puppy, true).map((n) => n.classDef.name)).toEqual([
       'Dog',
       'Animal',
     ]);
@@ -100,7 +100,7 @@ describe('collectHierarchy 收集继承链', () => {
     const parsed = parsedFiles([{ uri: 'test.R', text }]);
     const a = nodeOf(parsed, 'A');
     // 成环时截断，能正常返回（长度 ≤ 2）不卡死
-    expect(collectHierarchy(parsed, a, true).length).toBeLessThanOrEqual(2);
+    expect(collectHierarchy(parsed, a, false).length).toBeLessThanOrEqual(2);
   });
 
   it('跨文件成环也终止：a.R 的 A 继承 b.R 的 B，b.R 的 B 继承 a.R 的 A', () => {
@@ -109,7 +109,7 @@ describe('collectHierarchy 收集继承链', () => {
       { uri: 'b.R', text: 'B <- R6Class("B", inherit = A)' },
     ]);
     const a = nodeOf(parsed, 'A');
-    const names = collectHierarchy(parsed, a, true).map(
+    const names = collectHierarchy(parsed, a, false).map(
       (n) => `${n.parsed.file.uri}:${n.classDef.name}`,
     );
     // 能终止且每个节点至多出现一次
@@ -122,7 +122,7 @@ describe('findHierarchyMember 沿继承链找成员', () => {
   it('自己的成员：Puppy 里找 play → 命中 Puppy 自己', () => {
     const { parsed } = hierarchyParsed();
     const puppy = nodeOf(parsed, 'Puppy');
-    const hit = findHierarchyMember(parsed, puppy, 'play', ['public'], true);
+    const hit = findHierarchyMember(parsed, puppy, 'play', ['public'], false);
     expect(hit).not.toBeNull();
     if (hit !== null) {
       expect(hit.node.classDef.name).toBe('Puppy');
@@ -133,7 +133,7 @@ describe('findHierarchyMember 沿继承链找成员', () => {
   it('父类成员：Puppy 里找 bark → 命中 Dog', () => {
     const { parsed } = hierarchyParsed();
     const puppy = nodeOf(parsed, 'Puppy');
-    const hit = findHierarchyMember(parsed, puppy, 'bark', ['public'], true);
+    const hit = findHierarchyMember(parsed, puppy, 'bark', ['public'], false);
     expect(hit).not.toBeNull();
     if (hit !== null) {
       expect(hit.node.classDef.name).toBe('Dog');
@@ -143,7 +143,7 @@ describe('findHierarchyMember 沿继承链找成员', () => {
   it('爷类成员：Puppy 里找 breathe → 命中 Animal', () => {
     const { parsed } = hierarchyParsed();
     const puppy = nodeOf(parsed, 'Puppy');
-    const hit = findHierarchyMember(parsed, puppy, 'breathe', ['public'], true);
+    const hit = findHierarchyMember(parsed, puppy, 'breathe', ['public'], false);
     expect(hit).not.toBeNull();
     if (hit !== null) {
       expect(hit.node.classDef.name).toBe('Animal');
@@ -157,7 +157,7 @@ describe('findHierarchyMember 沿继承链找成员', () => {
       'Puppy <- R6Class("Puppy", inherit = Dog)';
     const parsed = parsedFiles([{ uri: 'test.R', text }]);
     const puppy = nodeOf(parsed, 'Puppy');
-    const hit = findHierarchyMember(parsed, puppy, 'f', ['public'], true);
+    const hit = findHierarchyMember(parsed, puppy, 'f', ['public'], false);
     expect(hit).not.toBeNull();
     if (hit !== null) {
       expect(hit.node.classDef.name).toBe('Dog'); // 最近祖先赢，不回退到 Animal
@@ -167,7 +167,7 @@ describe('findHierarchyMember 沿继承链找成员', () => {
   it('不含起点：super$ 视角 —— 在 Puppy 里 super$bark → 命中 Dog', () => {
     const { parsed } = hierarchyParsed();
     const puppy = nodeOf(parsed, 'Puppy');
-    const hit = findHierarchyMember(parsed, puppy, 'bark', ['public'], false);
+    const hit = findHierarchyMember(parsed, puppy, 'bark', ['public'], true);
     expect(hit).not.toBeNull();
     if (hit !== null) {
       expect(hit.node.classDef.name).toBe('Dog');
@@ -177,7 +177,7 @@ describe('findHierarchyMember 沿继承链找成员', () => {
   it('不含起点时链上没有 → null（super$play 在父链里没有 play）', () => {
     const { parsed } = hierarchyParsed();
     const puppy = nodeOf(parsed, 'Puppy');
-    expect(findHierarchyMember(parsed, puppy, 'play', ['public'], false)).toBeNull();
+    expect(findHierarchyMember(parsed, puppy, 'play', ['public'], true)).toBeNull();
   });
 
   it('区限定：父类同名成员在 private 区 → 用 public 区查不到', () => {
@@ -190,7 +190,7 @@ describe('findHierarchyMember 沿继承链找成员', () => {
     const parsed = parsedFiles([{ uri: 'test.R', text }]);
     const child = nodeOf(parsed, 'Child');
     // 从 Child 只查 public：链上第一个 public 区的 age 在 Base
-    const hit = findHierarchyMember(parsed, child, 'age', ['public'], true);
+    const hit = findHierarchyMember(parsed, child, 'age', ['public'], false);
     expect(hit).not.toBeNull();
     if (hit !== null) {
       expect(hit.member.scope).toBe('public');
@@ -201,7 +201,7 @@ describe('findHierarchyMember 沿继承链找成员', () => {
   it('链上都没有 → null', () => {
     const { parsed } = hierarchyParsed();
     const puppy = nodeOf(parsed, 'Puppy');
-    expect(findHierarchyMember(parsed, puppy, 'missing', ['public'], true)).toBeNull();
+    expect(findHierarchyMember(parsed, puppy, 'missing', ['public'], false)).toBeNull();
   });
 
   it('跨文件：子类在当前文件、父类成员在依赖文件 → 命中依赖文件的父类节点', () => {
@@ -215,7 +215,7 @@ describe('findHierarchyMember 沿继承链找成员', () => {
       { uri: 'person.R', text: depText },
     ]);
     const child = nodeOf(parsed, 'Child');
-    const hit = findHierarchyMember(parsed, child, 'greet', ['public'], true);
+    const hit = findHierarchyMember(parsed, child, 'greet', ['public'], false);
     expect(hit).not.toBeNull();
     if (hit !== null) {
       expect(hit.node.parsed.file.uri).toBe('person.R');

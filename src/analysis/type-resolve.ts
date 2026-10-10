@@ -22,7 +22,7 @@ const MAX_TRACE_DEPTH = 100;
 
 /** 变量最终指向什么（追到源头的结果） */
 export type ResolvedType =
-  | { kind: 'class'; className: string } // 类生成器本身（P <- Person）
+  | { kind: 'generator'; className: string } // 类生成器本身（P <- Person）
   | { kind: 'instance'; className: string } // 实例（p <- Person$new()）
   | { kind: 'function' } // 变量是函数
   | null; // 追不到（环 / 未知 / 该位置前没赋值）
@@ -113,7 +113,7 @@ function resolveVarTypeDFS(
   if (first?.kind === 'identifier') {
     const range = r6CallTokenRange(tokens, stIndex);
     if (range !== null && tokens[range.enIndex + 1]?.text === '(') {
-      return { kind: 'class', className: binding.varName };
+      return { kind: 'generator', className: binding.varName };
     }
   }
 
@@ -122,7 +122,7 @@ function resolveVarTypeDFS(
     names: resolver,
     cursorOffset,
   });
-  if (evalResult.kind === 'class') return { kind: 'class', className: evalResult.className };
+  if (evalResult.kind === 'generator') return { kind: 'generator', className: evalResult.className };
   if (evalResult.kind === 'instance') return { kind: 'instance', className: evalResult.className };
   if (evalResult.kind === 'function') return { kind: 'function' };
 

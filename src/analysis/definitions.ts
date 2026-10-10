@@ -57,7 +57,7 @@ export function resolveClassDefinition(
   const word = ctx.cursorFile.tokens[wordIdx];
 
   // 在所有文件里找同名类：当前文件优先（先出现先匹配），找不到再去依赖文件
-  const cls = findClassAcrossFiles(ctx.parsed, word.text);
+  const cls = findClassAcrossFiles(ctx.parsedFiles, word.text);
   if (cls === undefined) return null;
 
   return definitionSiteAt(cls.classDef.name, cls.parsed, cls.classDef.nameOffset);
@@ -113,10 +113,10 @@ export interface ClassWithFile {
  * 按清单顺序（当前文件在前，依赖文件在后）—— 先出现先匹配。
  */
 export function findClassAcrossFiles(
-  parsed: ParsedSourceFile[],
+  parsedFiles: ParsedSourceFile[],
   className: string,
 ): ClassWithFile | undefined {
-  for (const entry of parsed) {
+  for (const entry of parsedFiles) {
     const cls = entry.classes.find((c) => c.name === className);
     if (cls !== undefined) return { classDef: cls, parsed: entry };
   }

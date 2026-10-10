@@ -90,8 +90,8 @@ export function resolveMemberDefinition(
     // super 只能写在类方法体里：先反查"光标在哪个类中"，那个类就是"我"
     const holder = containingClass(ctx, wordIdx);
     if (holder === undefined) return null;
-    // super$xxx = 父类的 xxx：从 holder 的父类起向上找（includeStart=false 跳过本类）
-    const hit = findHierarchyMember(ctx.parsed, holder, word.text, PUBLIC_VISIBLE, false);
+    // super$xxx = 父类的 xxx：从 holder 的父类起向上找（isSuper=true：跳过本类）
+    const hit = findHierarchyMember(ctx.parsedFiles, holder, word.text, PUBLIC_VISIBLE, true);
     if (hit === null) return null;
     return definitionSiteAt(word.text, hit.node.parsed, hit.member.nameOffset);
   }
@@ -115,8 +115,8 @@ export function resolveMemberDefinition(
     // self 也只能写在类方法体里：反查光标所在类
     const holder = containingClass(ctx, wordIdx);
     if (holder === undefined) return null;
-    // 继承来的方法 self 也能调：先本类后父类（includeStart=true，最近祖先优先）
-    const hit = findHierarchyMember(ctx.parsed, holder, word.text, PUBLIC_VISIBLE, true);
+    // 继承来的方法 self 也能调：先本类后父类（isSuper=false：含本类，最近祖先优先）
+    const hit = findHierarchyMember(ctx.parsedFiles, holder, word.text, PUBLIC_VISIBLE, false);
     if (hit !== null) return definitionSiteAt(word.text, hit.node.parsed, hit.member.nameOffset);
     // 本类和父类都没有 → 兜底查合成成员（new）
     return resolveSynthetic(holder, word.text);
@@ -126,7 +126,7 @@ export function resolveMemberDefinition(
   // 类外的访问只能看到 public/active（含继承来的），private 一律看不见
   const target = resolveNamedTarget(ctx, before.text, cursorOffset);
   if (target === undefined) return null;
-  const hit = findHierarchyMember(ctx.parsed, target, word.text, PUBLIC_VISIBLE, true);
+  const hit = findHierarchyMember(ctx.parsedFiles, target, word.text, PUBLIC_VISIBLE, false);
   if (hit !== null) return definitionSiteAt(word.text, hit.node.parsed, hit.member.nameOffset);
   return resolveSynthetic(target, word.text);
 }
@@ -144,13 +144,14 @@ export function containingClass(ctx: AnalysisContext, wordIdx: number): ClassWit
   return { classDef, parsed: ctx.cursorFile };
 }
 
-/** 容器的"可点范围"：目标类 + 哪些区可见 + 继承链是否含起点 + 是否只看本类 */
+/** 容器的"可点范围"：目标类 + 哪些区可见 + 是不是 `super$` 访问 + 是不是 `private$` 访问 */
 export interface ContainerScope {
   target: ClassWithFile;
   scopes: R6Scope[];
-  includeStart: boolean;
-  /** 只看本类、不沿继承链走（`private$` 专用：R6 里 private 不随继承可见） */
-  ownOnly: boolean;
+  /** 是 `super$` 访问：从父类起算、不含本类（原样传给 collectHierarchy / findHierarchyMember） */
+  isSuper: boolean;
+  /** 是 `private$` 访问：只看本类、不沿继承链（R6 里 private 不随继承可见） */
+  isPrivate: boolean;
 }
 
 /** 容器类型：生成器（`类名$` 出槽）还是实例（`实例$` 出成员）—— 两者能点的名字不同 */
@@ -175,14 +176,22 @@ function classTargetOfName(
   name: string,
   cursorOffset: number,
 ): { kind: 'generator' | 'instance'; target: ClassWithFile } | undefined {
-  const asClass = findClassAcrossFiles(ctx.parsed, name);
+
+  // 解析到name就是类名，直接返回即可。比如: Person <- R6Class(...)
+  const asClass = findClassAcrossFiles(ctx.parsedFiles, name);
   if (asClass !== undefined) return { kind: 'generator', target: asClass };
 
+  // 解析到name是类名的赋值或者是类的实例:
+  // 类名赋值，比如: Person <- R6Class(...); P <- Person
+  // 类的实例，比如: Person <- R6Class(...); person <- Person$new()
   const type = resolveVarType(ctx, name, cursorOffset);
-  if (type === null || (type.kind !== 'class' && type.kind !== 'instance')) return undefined;
-  const target = findClassAcrossFiles(ctx.parsed, type.className);
+  if (type === null || (type.kind !== 'generator' && type.kind !== 'instance')) return undefined;
+  
+  // 把类名定位到"类定义 + 所在文件"（下游要用它的 lines 换算行列、tokens 求值）
+  const target = findClassAcrossFiles(ctx.parsedFiles, type.className);
   if (target === undefined) return undefined;
-  return { kind: type.kind === 'class' ? 'generator' : 'instance', target };
+  
+  return { kind: type.kind, target };
 }
 
 /**
@@ -213,14 +222,14 @@ export function resolveContainerType(
       kind: 'instance',
       target: holder,
       scopes: container === 'private' ? ['private'] : PUBLIC_VISIBLE,
-      includeStart: container !== 'super',
-      ownOnly: container === 'private',
+      isSuper: container === 'super',
+      isPrivate: container === 'private',
     };
   }
 
   const hit = classTargetOfName(ctx, container, cursorOffset);
   if (hit === undefined) return undefined;
-  return { ...hit, scopes: PUBLIC_VISIBLE, includeStart: true, ownOnly: false };
+  return { ...hit, scopes: PUBLIC_VISIBLE, isSuper: false, isPrivate: false };
 }
 
 /**
@@ -241,24 +250,24 @@ export function resolveChainType(
   // 往后的每段都由上一段的类型决定，一律按实例默认可见性。
   for (let i = 1; i < chain.names.length; i++) {
     const name = chain.names[i];
-    const hit = current.ownOnly
+    const hit = current.isPrivate
       ? ownMember(current.target, name, current.scopes)
-      : findHierarchyMember(ctx.parsed, current.target, name, current.scopes, current.includeStart);
+      : findHierarchyMember(ctx.parsedFiles, current.target, name, current.scopes, current.isSuper);
     if (hit === null) return undefined;
 
     const type = memberValueType(ctx, hit.node, hit.member, cursorOffset);
     // 函数（或推不出类型）没有可点的成员 → 断链
     if (type === null || type.kind === 'function') return undefined;
 
-    const target = findClassAcrossFiles(ctx.parsed, type.className);
+    const target = findClassAcrossFiles(ctx.parsedFiles, type.className);
     if (target === undefined) return undefined;
 
     current = {
-      kind: type.kind === 'class' ? 'generator' : 'instance',
+      kind: type.kind,
       target,
       scopes: PUBLIC_VISIBLE,
-      includeStart: true,
-      ownOnly: false,
+      isSuper: false,
+      isPrivate: false,
     };
   }
 

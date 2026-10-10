@@ -7,7 +7,7 @@
 
 import * as vscode from 'vscode';
 import { completionTriggerAt, r6MemberCandidates, type Candidate } from '../analysis/completion';
-import { buildQueryInput } from './context';
+import { buildQueryInput, type QueryInput } from './context';
 
 /** 实现 VS Code 的"补全提供者"接口：敲 `$` 或按 Ctrl+Space 时被编辑器调用 */
 export class R6CompletionProvider implements vscode.CompletionItemProvider {
@@ -20,13 +20,15 @@ export class R6CompletionProvider implements vscode.CompletionItemProvider {
     document: vscode.TextDocument,
     position: vscode.Position,
   ): Promise<vscode.CompletionItem[] | undefined> {
-    // 不传 output：补全每次按键都会调一次，写日志会把输出面板刷满
-    const { ctx, cursorOffset } = await buildQueryInput(document, position);
+    // 拿到补全所需要的上下文和光标位置
+    const { ctx, cursorOffset }: QueryInput = await buildQueryInput(document, position);
 
+    // 拿到触发补全所需要的信息
     const trigger = completionTriggerAt(ctx, cursorOffset);
     if (trigger === null) return undefined;
 
     // `pkg::` 的包导出名还没做（见 DESIGN.md 第 5 项）；注册时也就不给 `:` 触发字符
+    // 20261012 zyh: 已确定，当前阶段还未实现::这种补全的逻辑
     if (trigger.kind === 'namespace') return undefined;
 
     const candidates = r6MemberCandidates(

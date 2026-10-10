@@ -11,9 +11,9 @@ describe('createContext 组装查询上下文', () => {
     ];
     const ctx = createContext(files, 'analysis.R');
 
-    // 光标文件相关：cursorFile 指向光标所在文件的解析结果（= parsed 里的那一项）
+    // 光标文件相关：cursorFile 指向光标所在文件的解析结果（= parsedFiles 里的那一项）
     expect(ctx.cursorFile.file.uri).toBe('analysis.R');
-    expect(ctx.cursorFile).toBe(ctx.parsed[0]); // 派生指针，不是副本
+    expect(ctx.cursorFile).toBe(ctx.parsedFiles[0]); // 派生指针，不是副本
     expect(ctx.cursorFile.tokens.length).toBeGreaterThan(0);
     // lines：光标文件的行索引（p$name 在第 2 行）
     expect(ctx.cursorFile.lines.positionAt(text.indexOf('p$name')).line).toBe(2);

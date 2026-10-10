@@ -14,16 +14,16 @@ describe('resolveVarType 变量类型解析', () => {
     expect(resolveVarType(ctx, 'p', text.length)).toEqual({ kind: 'instance', className: 'Person' });
   });
 
-  it('类定义本身：Person <- R6Class(...) → class Person（className = 变量名）', () => {
+  it('类定义本身：Person <- R6Class(...) → generator Person（className = 变量名）', () => {
     const text = 'Person <- R6Class("Person")';
     const ctx = singleCtx(text);
-    expect(resolveVarType(ctx, 'Person', text.length)).toEqual({ kind: 'class', className: 'Person' });
+    expect(resolveVarType(ctx, 'Person', text.length)).toEqual({ kind: 'generator', className: 'Person' });
   });
 
-  it('命名空间类定义：Person <- R6::R6Class(...) → class Person', () => {
+  it('命名空间类定义：Person <- R6::R6Class(...) → generator Person', () => {
     const text = 'Person <- R6::R6Class("Person")';
     const ctx = singleCtx(text);
-    expect(resolveVarType(ctx, 'Person', text.length)).toEqual({ kind: 'class', className: 'Person' });
+    expect(resolveVarType(ctx, 'Person', text.length)).toEqual({ kind: 'generator', className: 'Person' });
   });
 
   it('别名链递归：q <- Person$new(); p <- q → 追到 instance Person', () => {
@@ -40,17 +40,17 @@ describe('resolveVarType 变量类型解析', () => {
     expect(resolveVarType(ctx, 'p', cursor + 2)).toEqual({ kind: 'instance', className: 'Person' });
   });
 
-  it('模块取类：p <- person$Person（$ 链终点是类）→ 求值器识别为 class Person', () => {
+  it('模块取类：p <- person$Person（$ 链终点是类）→ 求值器识别为 generator Person', () => {
     // bindings 只记录位置；type-resolve 用求值器判断 $ 链终点 → Person
     const text = 'Person <- R6Class("Person")\np <- person$Person';
     const ctx = singleCtx(text);
-    expect(resolveVarType(ctx, 'p', text.length)).toEqual({ kind: 'class', className: 'Person' });
+    expect(resolveVarType(ctx, 'p', text.length)).toEqual({ kind: 'generator', className: 'Person' });
   });
 
-  it('直接赋类名：p <- Person（单名字是类）→ 求值器识别为 class Person', () => {
+  it('直接赋类名：p <- Person（单名字是类）→ 求值器识别为 generator Person', () => {
     const text = 'Person <- R6Class("Person")\np <- Person';
     const ctx = singleCtx(text);
-    expect(resolveVarType(ctx, 'p', text.length)).toEqual({ kind: 'class', className: 'Person' });
+    expect(resolveVarType(ctx, 'p', text.length)).toEqual({ kind: 'generator', className: 'Person' });
   });
 
   it('最近赋值：p 先 Person 后 Employee，不同位置返回不同类的实例', () => {

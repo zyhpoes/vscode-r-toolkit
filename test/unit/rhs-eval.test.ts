@@ -41,20 +41,20 @@ describe('evaluateRhs 赋值右边求值', () => {
     expect(evalVar(text, 'p')).toEqual({ kind: 'instance', className: 'Person' });
   });
 
-  it('Person（类名本身）→ class Person', () => {
+  it('Person（类名本身）→ generator Person', () => {
     const text = 'Person <- R6Class("Person")\np <- Person';
-    expect(evalVar(text, 'p')).toEqual({ kind: 'class', className: 'Person' });
+    expect(evalVar(text, 'p')).toEqual({ kind: 'generator', className: 'Person' });
   });
 
-  it('模块取类 person$Person → class Person', () => {
+  it('模块取类 person$Person → generator Person', () => {
     // person$Person 里的 Person 是类（类清单里有），person 是模块（忽略）
     const text = 'Person <- R6Class("Person")\np <- person$Person';
-    expect(evalVar(text, 'p')).toEqual({ kind: 'class', className: 'Person' });
+    expect(evalVar(text, 'p')).toEqual({ kind: 'generator', className: 'Person' });
   });
 
-  it('多级链 proj$models$Person → class Person（链尾是类）', () => {
+  it('多级链 proj$models$Person → generator Person（链尾是类）', () => {
     const text = 'Person <- R6Class("Person")\np <- proj$models$Person';
-    expect(evalVar(text, 'p')).toEqual({ kind: 'class', className: 'Person' });
+    expect(evalVar(text, 'p')).toEqual({ kind: 'generator', className: 'Person' });
   });
 
   it('function 定义 → function', () => {

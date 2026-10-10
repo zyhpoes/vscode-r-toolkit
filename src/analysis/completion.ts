@@ -102,19 +102,20 @@ export function r6MemberCandidates(
   containerIndex: number,
   cursorOffset: number,
 ): Candidate[] | null {
-  // 链式容器（`model$key_id$`）：整条链解析得出 → 按终点类型出候选
+  // 从"容器"往回收成整条链：containerIndex 指向紧挨光标那个 `$` 的左边（即最后一段）。
+  // 例 `model$key_id$lab|`（光标在 lab 后）：容器 = `key_id`，被补的词 = `lab`（**不在链里**），
+  // 链 = ['model', 'key_id']；`lines` 只给 isChainJoint 判"连接符与名字同一行"用。
   const chain = memberChainSegments(ctx.cursorFile.tokens, ctx.cursorFile.lines, containerIndex);
-  if (chain.names.length > 1) {
-    const resolved = resolveChainType(ctx, chain, cursorOffset);
-    if (resolved !== undefined) return candidatesFor(ctx, resolved, cursorOffset);
-    // 折叠不了就往下走：退回"只看最后一段"（`person$Person$` 走这里，与没做链式之前一致）
-  }
 
-  // 单段容器（含上面的退路）：**按类型分派**，而不是按"名字是不是类名"——
-  // 这样 `P <- Person` 这种"生成器值的变量"也能分对（生成器出槽，实测用户成员取不到）
-  const resolved = resolveContainerType(ctx, container, containerIndex, cursorOffset);
-  if (resolved === undefined) return null;
-  return candidatesFor(ctx, resolved, cursorOffset);
+  // 段数 1 = 容器本身，段数 ≥2 = 在容器基础上逐段折叠 —— 两种情况共用这一条路
+  const chained = resolveChainType(ctx, chain, cursorOffset);
+  if (chained !== undefined) return candidatesFor(ctx, chained, cursorOffset);
+  // 单段时上面那次就是"解析容器本身"，没有别的可试
+  if (chain.names.length === 1) return null;
+
+  // 折叠失败才走退路：只看最后一段当容器（`person$Person$` 走这里，与没做链式之前一致）
+  const fallback = resolveContainerType(ctx, container, containerIndex, cursorOffset);
+  return fallback === undefined ? null : candidatesFor(ctx, fallback, cursorOffset);
 }
 
 /** 按容器类型出候选：生成器 → 自带槽；实例 → public/active 成员 */
@@ -131,6 +132,7 @@ function candidatesFor(
 /**
  * 从容器那个 token 往回收集链：`model$key_id$` → `{ names: ['model','key_id'], headIndex: 0 }`。
  * 只认"名字 $ 名字 $ …"：碰到 `::`、`)`、语句开头就停。
+ * 光标所在的那个词永远不进链 —— 它是"待补的成员名"，链只收光标左边已经写下的段。
  */
 function memberChainSegments(
   tokens: Token[],
@@ -141,16 +143,16 @@ function memberChainSegments(
   let headIndex = containerIndex;
   while (isChainJoint(tokens, lines, headIndex)) {
     headIndex -= 2;
+    // 在数组【开头】插入一个元素 → 返回【新的长度】
     names.unshift(tokens[headIndex].text);
   }
   return { names, headIndex };
 }
 
 /**
- * 左边那个 `$` 算不算本链的连接符。
- * 除了"`$` + 标识符"的形状，还要求它与右边的名字**同一行** ——
- * 换行 = 语句结束（与 type-resolve 的 isSingleNameRhs 同一约定）：
- * 上一句以 `$` 结尾时，不该把它与下一行的名字接成一条链。
+ * 确保补全的连接符在同一行(也是这个函数最主要的存在意义)。比如:
+ * model$key_id$label 在同一行时会触发补全
+ * model$key_id$\nlabel 不会触发补全
  */
 function isChainJoint(tokens: Token[], lines: TextLines, headIndex: number): boolean {
   const dollar = tokens[headIndex - 1];
@@ -170,8 +172,8 @@ function memberCandidates(
   scope: ContainerScope,
   cursorOffset: number,
 ): Candidate[] {
-  const { target, scopes, includeStart, ownOnly } = scope;
-  const chain = ownOnly ? [target] : collectHierarchy(ctx.parsed, target, includeStart);
+  const { target, scopes, isSuper, isPrivate } = scope;
+  const chain = isPrivate ? [target] : collectHierarchy(ctx.parsedFiles, target, isSuper);
   const candidates: Candidate[] = [];
   const seen = new Set<string>();
 
@@ -225,7 +227,7 @@ function memberDetail(
 ): string {
   const type = memberValueType(ctx, node, member, cursorOffset);
   if (type === null) return scopeDetail(member.scope);
-  if (type.kind === 'class') return `${type.className}类`;
+  if (type.kind === 'generator') return `${type.className}类`;
   if (type.kind === 'instance') return `${type.className}实例`;
   if (type.kind === 'function') return '函数';
   return scopeDetail(member.scope);
