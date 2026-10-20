@@ -6,6 +6,7 @@
 
 import { tokenize, type Token } from '../parser/tokenizer';
 import { parseR6, type R6ClassDef } from '../parser/r6-parser';
+import { buildBlockTree, type Block } from '../parser/blocks';
 import { TextLines } from '../utils/text';
 import { parseBindings, type Binding } from './bindings';
 import { parseTopLevelSymbols, type TopLevelSymbol } from './module-symbols';
@@ -35,6 +36,8 @@ export interface ParsedSourceFile {
   symbols: TopLevelSymbol[];
   /** 该文件的赋值记录（变量类型追踪用） */
   bindings: Binding[];
+  /** 该文件的块结构（光标归属判断用；先序，外层在前） */
+  blocks: Block[];
 }
 
 /**
@@ -59,6 +62,7 @@ export function parseSourceFile(file: SourceFile, tokens?: Token[]): ParsedSourc
     classes: parseR6(usedTokens),
     symbols: parseTopLevelSymbols(usedTokens),
     bindings: parseBindings(usedTokens),
+    blocks: buildBlockTree(usedTokens),
   };
 }
 

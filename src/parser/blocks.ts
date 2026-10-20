@@ -19,14 +19,13 @@
  *   stIndex / enIndex        整体范围：function 块的 stIndex 是 `function` 关键字，enIndex 是体结束
  *   headStIndex / headEnIndex 头：参数表 / 类调用的圆括号（含括号）
  *   bodyStIndex / bodyEnIndex 体：**含花括号**（只有 function 块有）
- *   没有头/体时**不写这两个属性**（exactOptionalPropertyTypes 下不能显式赋 undefined）
+ *   没有头/体时**不写对应属性**（exactOptionalPropertyTypes 下不能显式赋 undefined）
  *
  * 已知近似（有意为之，不是疏漏）：
  *   - 函数体**只认花括号**：`function(x) x + 1` 与 `function(x)` 换行后再写体，一律按"没有体"处理
  *     （精确识别单表达式体需要表达式结构，这里有意让位：少给归属，不猜）
  *   - 括号不配对（用户正在打字）时终点兜到文件尾
  *   - R 4.1 的简写函数 `\(x) x + 1` 不识别（只认 `function` 关键字）
- *   - 递归只往"体 / 圆括号内部"走，所以形参默认值里的 `function`（`function(f = function() 1)`）不建块
  *   - `local({ ... })` 实际会开新作用域（`local` 是函数），这里按普通语句处理 → 里面的赋值会被
  *     算成外层（让位）。将来若要支持，把它识别成 function 块即可（与 function 同形），不必加新种类
  */
@@ -146,6 +145,8 @@ function functionBlockAt(tokens: Token[], index: number): Block | undefined {
 /**
  * 从一个 `R6Class` 关键字算出一个类块。
  * R6 类的范围就是那对圆括号，没有独立的花括号"体"；括号不配对 → undefined。
+ * `R6::R6Class(...)` 时起点对齐到 `R6`（与 parseR6 的 R6ClassDef.stIndex 一致），
+ * 这样"块 ↔ 类定义"可以用**起点相等**来配对。
  */
 function r6ClassBlockAt(tokens: Token[], index: number): Block | undefined {
   const headStIndex = index + 1;
@@ -153,7 +154,12 @@ function r6ClassBlockAt(tokens: Token[], index: number): Block | undefined {
   const headEnIndex = matchBracket(tokens, headStIndex, '(');
   if (headEnIndex === -1) return undefined;
 
-  return { kind: 'r6-class', stIndex: index, enIndex: headEnIndex, headStIndex, headEnIndex };
+  // 默认起点就是 `R6Class` 这个 token 自己
+  let stIndex = index;
+  // `R6::R6Class(...)` 时往前挪到 `R6`
+  if (tokens[index - 1]?.text === '::' && tokens[index - 2]?.text === 'R6') stIndex = index - 2;
+
+  return { kind: 'r6-class', stIndex, enIndex: headEnIndex, headStIndex, headEnIndex };
 }
 
 /** 最内层包含 index 的块（含 index 的那些块里起点最大者）；越界 → undefined */

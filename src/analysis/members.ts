@@ -11,6 +11,7 @@
  */
 
 import type { R6Member, R6Scope } from '../parser/r6-parser';
+import { enclosingBlock } from '../parser/blocks';
 import type { AnalysisContext } from './context';
 import { definitionSiteAt, findClassAcrossFiles, type ClassWithFile, type DefinitionSite } from './definitions';
 import { findHierarchyMember } from './inheritance';
@@ -135,11 +136,14 @@ export function resolveMemberDefinition(
  * 反查"光标所在类"：self/private/super 写在方法体里，
  * 方法体在类的 R6Class 调用范围内 → 光标落在哪个类范围里，就是哪个类。
  * （跳转与补全共用；补全传的是容器名那个 token 的下标）
+ *
+ * 用块结构回答"我在哪个类里"，再按【起点】配对类定义：
+ * 类块的起点已对齐到 parseR6 的 R6ClassDef.stIndex（R6::R6Class 也取 `R6`），所以直接比起点。
  */
 export function containingClass(ctx: AnalysisContext, wordIdx: number): ClassWithFile | undefined {
-  const classDef = ctx.cursorFile.classes.find(
-    (c) => c.stIndex <= wordIdx && wordIdx <= c.enIndex,
-  );
+  const block = enclosingBlock(ctx.cursorFile.blocks, wordIdx, 'r6-class');
+  if (block === undefined) return undefined;
+  const classDef = ctx.cursorFile.classes.find((c) => c.stIndex === block.stIndex);
   if (classDef === undefined) return undefined;
   return { classDef, parsed: ctx.cursorFile };
 }
