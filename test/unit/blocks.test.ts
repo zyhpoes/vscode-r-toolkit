@@ -188,13 +188,13 @@ describe('边界情况', () => {
   it('R6::R6Class 的类块起点与 parseR6 的类定义起点对齐（可以直接用启动配对）', () => {
     // 裸写法：两边都指向 R6Class
     const bare = 'A <- R6Class("A")';
-    const bareClasses = parseR6(tokenize(bare));
+    const bareClasses = parseR6('test.R', tokenize(bare));
     expect(blocksOf(bare)[1].stIndex).toBe(bareClasses[0].stIndex);
 
     // 命名空间写法：两边都必须指向 R6（不是 R6Class）
     const ns = 'B <- R6::R6Class("B")';
     const nsTokens = tokenize(ns);
-    const nsClasses = parseR6(nsTokens);
+    const nsClasses = parseR6('test.R', nsTokens);
     const nsBlock = blocksOf(ns)[1];
     expect(nsBlock.stIndex).toBe(nsClasses[0].stIndex);
     expect(nsTokens[nsBlock.stIndex].text).toBe('R6');

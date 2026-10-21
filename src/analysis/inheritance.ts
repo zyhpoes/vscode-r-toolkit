@@ -10,12 +10,12 @@
  * 留给将来模块索引。
  *
  * 入参是 context 预解析好的 ParsedSourceFile[]（每个文件只解析过一次），
- * 本模块只遍历，不再 parseR6。"类 + 文件"配对用 definitions 的 ClassWithFile（单一出处）。
+ * 本模块只遍历，不再 parseR6。"类 + 文件"配对用 definitions 的 R6ClassWithFile（单一出处）。
  */
 
 import type { R6Member, R6Scope } from '../parser/r6-parser';
 import type { ParsedSourceFile } from './source-file';
-import { findClassAcrossFiles, type ClassWithFile } from './definitions';
+import { findClassAcrossFiles, type R6ClassWithFile } from './definitions';
 
 /**
  * 解析一个类的父类：把 inherit 引用解析成父类（带文件）。
@@ -23,8 +23,8 @@ import { findClassAcrossFiles, type ClassWithFile } from './definitions';
  */
 export function resolveParentNode(
   parsedFiles: ParsedSourceFile[],
-  node: ClassWithFile,
-): ClassWithFile | null {
+  node: R6ClassWithFile,
+): R6ClassWithFile | null {
   const inherit = node.classDef.inherit;
   if (inherit === undefined) return null;
   // ?? null：findClassAcrossFiles 找不到返回 undefined，对外统一返回 null
@@ -32,7 +32,7 @@ export function resolveParentNode(
 }
 
 /** 类身份（防环用）：文件 uri + 类名（同名不同文件是不同类） */
-function nodeKey(node: ClassWithFile): string {
+function nodeKey(node: R6ClassWithFile): string {
   return `${node.parsed.file.uri}::${node.classDef.name}`;
 }
 
@@ -43,12 +43,12 @@ function nodeKey(node: ClassWithFile): string {
  */
 export function collectHierarchy(
   parsedFiles: ParsedSourceFile[],
-  start: ClassWithFile,
+  start: R6ClassWithFile,
   isSuper: boolean,
-): ClassWithFile[] {
-  const chain: ClassWithFile[] = [];
+): R6ClassWithFile[] {
+  const chain: R6ClassWithFile[] = [];
   const visited = new Set<string>();
-  let cur: ClassWithFile | null = isSuper ? resolveParentNode(parsedFiles, start) : start;
+  let cur: R6ClassWithFile | null = isSuper ? resolveParentNode(parsedFiles, start) : start;
   while (cur !== null && !visited.has(nodeKey(cur))) {
     visited.add(nodeKey(cur));
     chain.push(cur);
@@ -63,13 +63,14 @@ export function collectHierarchy(
  */
 export function findHierarchyMember(
   parsedFiles: ParsedSourceFile[],
-  start: ClassWithFile,
+  start: R6ClassWithFile,
   memberName: string,
   scopes: R6Scope[],
   isSuper: boolean,
-): { node: ClassWithFile; member: R6Member } | null {
+): { node: R6ClassWithFile; member: R6Member } | null {
   for (const node of collectHierarchy(parsedFiles, start, isSuper)) {
-    const member = node.classDef.members.find(
+    // 成员按两侧存放（public 侧含 active），这里两侧都看，再用 scopes 筛区
+    const member = [...node.classDef.publicMembers, ...node.classDef.privateMembers].find(
       (m) => m.name === memberName && scopes.includes(m.scope),
     );
     if (member !== undefined) return { node, member };

@@ -4,7 +4,7 @@ import {
   findHierarchyMember,
   resolveParentNode,
 } from '../../src/analysis/inheritance';
-import type { ClassWithFile } from '../../src/analysis/definitions';
+import type { R6ClassWithFile } from '../../src/analysis/definitions';
 import {
   parseSourceFile,
   type ParsedSourceFile,
@@ -17,7 +17,7 @@ function parsedFiles(files: SourceFile[]): ParsedSourceFile[] {
 }
 
 // 辅助：在预解析清单里定位类名对应的"类 + 文件"配对（测试夹具都用）
-function nodeOf(parsed: ParsedSourceFile[], className: string): ClassWithFile {
+function nodeOf(parsed: ParsedSourceFile[], className: string): R6ClassWithFile {
   for (const entry of parsed) {
     const classDef = entry.classes.find((c) => c.name === className);
     if (classDef !== undefined) return { parsed: entry, classDef };

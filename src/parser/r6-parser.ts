@@ -28,6 +28,8 @@ export interface R6Member {
 
 /** 一个识别出的 R6 类定义：名字 + 名字偏移 + 成员清单 + 调用范围（token 下标） */
 export interface R6ClassDef {
+  // 这个类定义在哪个文件
+  uri: string;
   // 类名
   name: string;
   // 类名在原文的偏移
@@ -39,16 +41,24 @@ export interface R6ClassDef {
    *         private = list(age = NA),
    *         active = list(age = function(value) private$age)
    *       )
-   * 
-   * members 拿到的结果为: [
+   *
+   * R6 只有**两种可见性**（public / private），active 属于公共侧（实测：
+   * `ls(实例)` / `super$x` 都能看到它，见 evidence/demo1.R），所以按两侧存两份：
+   *
+   * publicMembers  = [
    *    {scope: 'public', name: 'greet', nameOffset: 38 },
    *    {scope: 'public', name: 'name', nameOffset: 65 },
-   *    {scope: 'private', name: 'age', nameOffset: 95 },
-   *    {scope: 'active', name: 'age', nameOffset: 122 }
+   *    {scope: 'active', name: 'age',  nameOffset: 122 }   ← active 也在公共侧
    * ]
-   * （stIndex 未列）
+   * privateMembers = [
+   *    {scope: 'private', name: 'age', nameOffset: 95 }
+   * ]
+   *
+   * 每个成员仍保留 `scope`（三值），因为 active 与 public 的行为不同（读写会调函数），
+   * 大纲要按 active / public / private 三区分别展示。（stIndex 未列）
    */
-  members: R6Member[];
+  publicMembers: R6Member[];
+  privateMembers: R6Member[];
 
   /** 合成成员（R6 自动生成、非用户定义）。v1 只含 new：有 initialize 指向它，否则指向类名 */
   synthetic: SyntheticMember[];
@@ -87,8 +97,10 @@ export interface InheritRef {
 /**
  * 从**已有 token** 里识别所有 R6 类定义。
  * 切词由调用方负责（provider 切光标文件、parseSourceFile 切依赖文件）。
+ * @param uri    这些 token 来自哪个文件（原样抄进每个类定义，parseR6 自己不解析文件）
+ * @param tokens 该文件的 token 流
  */
-export function parseR6(tokens: Token[]): R6ClassDef[] {
+export function parseR6(uri: string, tokens: Token[]): R6ClassDef[] {
   const result: R6ClassDef[] = [];
 
   for (let i = 0; i < tokens.length; i++) {
@@ -119,9 +131,12 @@ export function parseR6(tokens: Token[]): R6ClassDef[] {
       const synthetic = buildSynthetic(members, cls.nameOffset);
       // 返回结果
       result.push({
+        uri,                          // 类所在文件（由调用方给，原样抄）
         name: cls.name,               // 类名
         nameOffset: cls.nameOffset,   // 类名的偏移量
-        members,                      // 成员清单（public/private/active 提取结果）
+        // 成员按"两侧"存：public 侧含 active（实测 active 在公共侧），private 侧只有 private
+        publicMembers: members.filter((m) => m.scope !== 'private'),
+        privateMembers: members.filter((m) => m.scope === 'private'),
         synthetic,                    // 合成成员（new）
         inherit: extractInherit(tokens, openIndex, closeIndex), // 父类引用（inherit = X）
         stIndex: callName.stIndex,    // 调用名第一个 token 的下标（调用范围起点）

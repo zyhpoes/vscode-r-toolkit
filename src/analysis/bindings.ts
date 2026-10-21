@@ -1,10 +1,10 @@
 /**
- * 变量绑定解析：扫描所有赋值语句，只记录"变量 ← 什么位置"，不做分类。
+ * 变量绑定解析：扫描所有赋值语句，只记录"哪个变量、在哪被 `<-` 赋值、赋值符号在哪个 token"，不做分类。
  * 纯逻辑：不依赖 vscode，可在纯 Node 中测试。
  *
  * 用途：支撑实例成员跳转（p$xxx）—— 点 p 的成员时，先查 p 被赋成了什么。
  * 类型判断不在这里做：统一交给 type-resolve（编排）+ rhs-eval（求值器），
- * 本文件只提供"最近一次赋值在哪"的索引。
+ * 本文件只提供"最近一次赋值在哪"的索引（右侧起点由 opIndex + 1 现算，不单独存）。
  */
 
 import type { Token } from '../parser/tokenizer';
@@ -12,8 +12,8 @@ import type { Token } from '../parser/tokenizer';
 /** 一条赋值记录（只记录位置，不判断右侧是什么） */
 export interface Binding {
   varName: string; // 被赋值的变量名（赋值左侧）
-  stIndex: number; // token 坐标：右侧第一个 token 的下标（求值器走访右边表达式用）
-  offset: number; // 字符坐标：变量名在原文里的字符偏移（光标比较 / 跳转目标用）
+  varOffset: number; // 字符坐标：变量名在原文里的字符偏移（光标比较 / 跳转目标用）
+  opIndex: number; // token 坐标：赋值符号（<-）的下标；右侧起点 = opIndex + 1（求值器走访右边表达式用）
 }
 
 /**
@@ -34,7 +34,7 @@ export function parseBindings(tokens: Token[]): Binding[] {
     if (lhs?.kind !== 'identifier') continue;
     if (tokens[i - 2]?.text === '$') continue;
 
-    bindings.push({ varName: lhs.text, stIndex: i + 1, offset: lhs.stOffset });
+    bindings.push({ varName: lhs.text, varOffset: lhs.stOffset, opIndex: i });
   }
 
   return bindings;
@@ -56,7 +56,7 @@ export function findLatestBinding(
 ): Binding | undefined {
   for (let i = bindings.length - 1; i >= 0; i--) {
     const b = bindings[i];
-    if (b.varName === varName && b.offset <= cursorOffset) return b;
+    if (b.varName === varName && b.varOffset <= cursorOffset) return b;
   }
   return undefined;
 }

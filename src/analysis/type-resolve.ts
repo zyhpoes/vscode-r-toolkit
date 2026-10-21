@@ -14,18 +14,12 @@ import type { Token } from '../parser/tokenizer';
 import type { TextLines } from '../utils/text';
 import { findLatestBinding, type Binding } from './bindings';
 import { evaluateRhs, type NameResolver } from './rhs-eval';
-import type { ClassWithFile } from './definitions';
+import type { ValueType } from './types';
+import type { R6ClassWithFile } from './definitions';
 import type { AnalysisContext } from './context';
 
 /** 别名链最大追踪深度（visited 已防环，这是第二道保险） */
 const MAX_TRACE_DEPTH = 100;
-
-/** 变量最终指向什么（追到源头的结果） */
-export type ResolvedType =
-  | { kind: 'generator'; className: string } // 类生成器本身（P <- Person）
-  | { kind: 'instance'; className: string } // 实例（p <- Person$new()）
-  | { kind: 'function' } // 变量是函数
-  | null; // 追不到（环 / 未知 / 该位置前没赋值）
 
 /**
  * 成员**右值**的类型：`key_id = FieldInfo` → class FieldInfo（实例则由 `$new()` 判出）。
@@ -33,16 +27,15 @@ export type ResolvedType =
  */
 export function memberValueType(
   ctx: AnalysisContext,
-  node: ClassWithFile,
+  node: R6ClassWithFile,
   member: R6Member,
   cursorOffset: number,
-): ResolvedType {
-  if (member.stIndex === undefined) return null;
-  const type = evaluateRhs(node.parsed.tokens, member.stIndex, {
+): ValueType {
+  if (member.stIndex === undefined) return { kind: 'unknown' };
+  return evaluateRhs(node.parsed.tokens, member.stIndex, {
     names: ctx.resolver,
     cursorOffset,
   });
-  return type.kind === 'unknown' ? null : type;
 }
 
 /**
@@ -56,7 +49,7 @@ export function resolveVarType(
   ctx: AnalysisContext,
   varName: string,
   cursorOffset: number,
-): ResolvedType {
+): ValueType {
   // L1：只在光标所在文件里追踪变量（bindings 只记了光标文件的赋值）
   return resolveVarTypeDFS(
     ctx.cursorFile.bindings,
@@ -93,19 +86,19 @@ function resolveVarTypeDFS(
   cursorOffset: number,
   visited: Set<string>,
   depth: number,
-): ResolvedType {
+): ValueType {
   // DFS 终止条件一：这个变量已经追过 → 环（如 a <- b; b <- a）→ 追不到
-  if (visited.has(varName)) return null;
+  if (visited.has(varName)) return { kind: 'unknown' };
   // DFS 终止条件二：链超长 → 追不到（正常代码远到不了这个深度）
-  if (depth > MAX_TRACE_DEPTH) return null;
+  if (depth > MAX_TRACE_DEPTH) return { kind: 'unknown' };
   visited.add(varName);
 
   // 找 varName 在光标前"最近一次"赋值（逻辑在 bindings.ts，与变量跳转共用同一份）
   const binding = findLatestBinding(bindings, varName, cursorOffset);
   // DFS 终止条件三：光标位置前没有这条变量的赋值 → 追不到
-  if (binding === undefined) return null;
+  if (binding === undefined) return { kind: 'unknown' };
 
-  const stIndex = binding.stIndex; // 右侧第一个 token 的下标
+  const stIndex = binding.opIndex + 1; // 右侧第一个 token 的下标
   const first = tokens[stIndex];
 
   // 本层出结论：类定义 —— Person <- R6Class(...) / R6::R6Class(...)。
@@ -113,7 +106,7 @@ function resolveVarTypeDFS(
   if (first?.kind === 'identifier') {
     const range = r6CallTokenRange(tokens, stIndex);
     if (range !== null && tokens[range.enIndex + 1]?.text === '(') {
-      return { kind: 'generator', className: binding.varName };
+      return { kind: 'r6-generator', className: binding.varName };
     }
   }
 
@@ -122,9 +115,7 @@ function resolveVarTypeDFS(
     names: resolver,
     cursorOffset,
   });
-  if (evalResult.kind === 'generator') return { kind: 'generator', className: evalResult.className };
-  if (evalResult.kind === 'instance') return { kind: 'instance', className: evalResult.className };
-  if (evalResult.kind === 'function') return { kind: 'function' };
+  if (evalResult.kind !== 'unknown') return evalResult;
 
   // 本层判断不了（unknown）→ 若右侧是"单个变量名"（p <- q），可能是别名，
   // 沿链 DFS 递归追那个变量（visited/depth 已保证安全）
@@ -134,7 +125,7 @@ function resolveVarTypeDFS(
   }
 
   // 形状不明（表达式 / 字面量等）→ 追不到
-  return null;
+  return { kind: 'unknown' };
 }
 
 /**

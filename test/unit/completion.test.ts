@@ -13,7 +13,7 @@ describe('completionTriggerAt 补全触发上下文', () => {
     const text = 'self$';
     expect(completionTriggerAt(singleCtx(text), text.length)).toMatchObject({
       kind: 'member',
-      container: 'self',
+      containerName: 'self',
     });
   });
 
@@ -21,7 +21,7 @@ describe('completionTriggerAt 补全触发上下文', () => {
     const text = 'self$gr';
     expect(completionTriggerAt(singleCtx(text), text.length)).toMatchObject({
       kind: 'member',
-      container: 'self',
+      containerName: 'self',
     });
   });
 
@@ -29,7 +29,7 @@ describe('completionTriggerAt 补全触发上下文', () => {
     const text = 'self$gr';
     expect(completionTriggerAt(singleCtx(text), text.indexOf('r'))).toMatchObject({
       kind: 'member',
-      container: 'self',
+      containerName: 'self',
     });
   });
 
@@ -40,10 +40,10 @@ describe('completionTriggerAt 补全触发上下文', () => {
       ['Person$', 'Person'],
       ['p$', 'p'],
     ] as const;
-    for (const [text, container] of cases) {
+    for (const [text, containerName] of cases) {
       expect(completionTriggerAt(singleCtx(text), text.length)).toMatchObject({
         kind: 'member',
-        container,
+        containerName,
       });
     }
   });
@@ -52,7 +52,7 @@ describe('completionTriggerAt 补全触发上下文', () => {
     const text = 'stats::';
     expect(completionTriggerAt(singleCtx(text), text.length)).toMatchObject({
       kind: 'namespace',
-      container: 'stats',
+      containerName: 'stats',
     });
   });
 
@@ -60,7 +60,7 @@ describe('completionTriggerAt 补全触发上下文', () => {
     const text = 'stats::run';
     expect(completionTriggerAt(singleCtx(text), text.length)).toMatchObject({
       kind: 'namespace',
-      container: 'stats',
+      containerName: 'stats',
     });
   });
 
@@ -73,7 +73,7 @@ describe('completionTriggerAt 补全触发上下文', () => {
     const text = 'Person$new()';
     expect(completionTriggerAt(singleCtx(text), text.indexOf('new') + 1)).toMatchObject({
       kind: 'member',
-      container: 'Person',
+      containerName: 'Person',
     });
   });
 
@@ -158,7 +158,7 @@ function r6At(ctx: AnalysisContext, text: string, needle: string): Candidate[] |
   const cursor = after(text, needle);
   const trigger = completionTriggerAt(ctx, cursor);
   if (trigger === null) throw new Error(`测试文本在 ${needle} 处没有触发补全`);
-  return r6MemberCandidates(ctx, trigger.container, trigger.containerIndex, cursor);
+  return r6MemberCandidates(ctx, trigger.containerIndex, cursor);
 }
 
 /** 辅助：只取候选名 */
@@ -212,9 +212,10 @@ describe('r6MemberCandidates R6 成员候选', () => {
     expect(detailOf(items, 'v')).toBe('public 成员');
   });
 
-  it('private$ → 只本类 private（R6：private 不随继承可见；实测私有环境里没有 clone）', () => {
-    expect(labels(r6At(ctxOf(), R6_TEXT, 'private$'))).toEqual(['inner']);
-    expect(detailOf(r6At(ctxOf(), R6_TEXT, 'private$'), 'inner')).toBe('函数');
+  it('private$ → 本类 + 父类的 private（实测：父类 private 会复制进子类环境；仍不含 clone）', () => {
+    const items = r6At(ctxOf(), R6_TEXT, 'private$');
+    expect(labels(items)).toEqual(['inner', 'secret']); // 子类自己的在前，父类的在后
+    expect(detailOf(items, 'inner')).toBe('函数');
   });
 
   it('super$ → 只父类链的 public/active（不含本类、不含 new）', () => {

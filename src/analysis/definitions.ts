@@ -81,7 +81,7 @@ export function resolveVariableDefinition(
 
   // 首选：该变量"光标前最近一次"赋值（逻辑在 bindings.ts，与类型推断共用同一份）
   const binding = findLatestBinding(ctx.cursorFile.bindings, word.text, cursorOffset);
-  if (binding !== undefined) return definitionSiteAt(word.text, ctx.cursorFile, binding.offset);
+  if (binding !== undefined) return definitionSiteAt(word.text, ctx.cursorFile, binding.varOffset);
 
   // 兜底：顶层用 `=` 定义的（bindings 只记 `<-`，而 symbols 两种赋值号都记）
   // 两条约束与主路径保持一致：
@@ -100,9 +100,9 @@ export function resolveVariableDefinition(
   return definitionSiteAt(hit.name, ctx.cursorFile, hit.offset);
 }
 
-/** 跨文件找类的结果：类定义 + 它所在的那个"已解析文件"（带 lines/symbols 等全部产物）。
+/** 跨文件找 R6 类的结果：类定义 + 它所在的那个"已解析文件"（带 lines/symbols 等全部产物）。
  *  类名跳转 / 成员跳转 / 继承链都用它（单一出处，避免各模块自造同名结构） */
-export interface ClassWithFile {
+export interface R6ClassWithFile {
   classDef: R6ClassDef;
   parsed: ParsedSourceFile;
 }
@@ -115,9 +115,9 @@ export interface ClassWithFile {
 export function findClassAcrossFiles(
   parsedFiles: ParsedSourceFile[],
   className: string,
-): ClassWithFile | undefined {
+): R6ClassWithFile | undefined {
   for (const entry of parsedFiles) {
-    const cls = entry.classes.find((c) => c.name === className);
+    const cls = entry.classes.find((c) => c.uri === entry.file.uri && c.name === className);
     if (cls !== undefined) return { classDef: cls, parsed: entry };
   }
   return undefined;

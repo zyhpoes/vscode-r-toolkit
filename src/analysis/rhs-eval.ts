@@ -11,6 +11,7 @@
 
 import type { Token } from '../parser/tokenizer';
 import type { R6ClassDef } from '../parser/r6-parser';
+import type { ValueType } from './types';
 
 /** 名字查询接口：求值器问"这个名字是类还是函数"，不感知背后实现（类表/函数表） */
 export interface NameResolver {
@@ -42,20 +43,13 @@ export interface EvalEnv {
   cursorOffset: number; // 找"最近赋值"用（预留，后续别名递归时用）
 }
 
-/** RHS 求值结果：指向什么 */
-export type RhsType =
-  | { kind: 'generator'; className: string } // 类生成器本身（Person / person$Person）
-  | { kind: 'instance'; className: string } // 实例（Person$new()）—— 两者能点的名字不同
-  | { kind: 'function' } // 指向函数
-  | { kind: 'unknown' }; // 求不出（表达式/字面量/漏写）
-
 /**
  * 对"赋值右边"求值。
  * @param tokens  整个文件 token
  * @param stRhs   右边第一个 token 的下标
  * @param env     求值环境（名字归类查询）
  */
-export function evaluateRhs(tokens: Token[], stRhs: number, env: EvalEnv): RhsType {
+export function evaluateRhs(tokens: Token[], stRhs: number, env: EvalEnv): ValueType {
   const first = tokens[stRhs];
   // 右边漏写（p <- 后面没内容，代码不完整）→ unknown
   if (first === undefined) return { kind: 'unknown' };
@@ -70,7 +64,7 @@ export function evaluateRhs(tokens: Token[], stRhs: number, env: EvalEnv): RhsTy
       return evaluateDollarChain(tokens, stRhs, env);
     }
     // 单名字：先查是不是类，再查是不是函数，都不是 → unknown
-    if (env.names.isClass(first.text)) return { kind: 'generator', className: first.text };
+    if (env.names.isClass(first.text)) return { kind: 'r6-generator', className: first.text };
     if (env.names.isFunction(first.text)) return { kind: 'function' };
     return { kind: 'unknown' };
   }
@@ -84,7 +78,7 @@ export function evaluateRhs(tokens: Token[], stRhs: number, env: EvalEnv): RhsTy
  * 规则：链里发现 `new(` → 类名 = new 前一个名字，结果是**实例**；
  *       没有 new(      → 类名 = 链上最后一个名字（查它是不是类），结果是**类生成器**本身。
  */
-function evaluateDollarChain(tokens: Token[], stChain: number, env: EvalEnv): RhsType {
+function evaluateDollarChain(tokens: Token[], stChain: number, env: EvalEnv): ValueType {
   // 沿链收集名字，并记录 new( 出现的位置
   const chainNames: string[] = [];
   let newNameIdx = -1; // new( 在 chainNames 里的下标（若出现）
@@ -109,5 +103,5 @@ function evaluateDollarChain(tokens: Token[], stChain: number, env: EvalEnv): Rh
 
   // 类名必须是"真类"才算数；`new(` 构造出来的是实例，否则是类生成器本身
   if (!env.names.isClass(className)) return { kind: 'unknown' };
-  return viaNew ? { kind: 'instance', className } : { kind: 'generator', className };
+  return viaNew ? { kind: 'r6-instance', className } : { kind: 'r6-generator', className };
 }

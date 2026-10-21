@@ -6,38 +6,38 @@ describe('parseBindings 扫描赋值（只记录，不分类）', () => {
   it('记录类定义：Person <- R6Class(...)', () => {
     const text = 'Person <- R6Class("Person", public = list())';
     expect(parseBindings(tokenize(text))).toEqual([
-      { varName: 'Person', stIndex: 2, offset: 0 },
+      { varName: 'Person', opIndex: 1, varOffset: 0 },
     ]);
   });
 
   it('记录实例创建：p <- Person$new()', () => {
     const text = 'p <- Person$new()';
     expect(parseBindings(tokenize(text))).toEqual([
-      { varName: 'p', stIndex: 2, offset: 0 },
+      { varName: 'p', opIndex: 1, varOffset: 0 },
     ]);
   });
 
   it('记录函数定义：func <- function(x) x', () => {
     const text = 'func <- function(x) x';
     expect(parseBindings(tokenize(text))).toEqual([
-      { varName: 'func', stIndex: 2, offset: 0 },
+      { varName: 'func', opIndex: 1, varOffset: 0 },
     ]);
   });
 
   it('记录表达式：c <- 1 + 1', () => {
     const text = 'c <- 1 + 1';
     expect(parseBindings(tokenize(text))).toEqual([
-      { varName: 'c', stIndex: 2, offset: 0 },
+      { varName: 'c', opIndex: 1, varOffset: 0 },
     ]);
   });
 
   it('记录别名：p <- q', () => {
     const text = 'q <- Person$new()\np <- q';
-    // q <- Person$new()：q(0) <-(1) Person(2) → q 的 stIndex=2
-    // p <- q：p(7) <-(8) q(9) → p 的 stIndex=9
+    // q <- Person$new()：q(0) <-(1) Person(2) → q 的 opIndex=1
+    // p <- q：p(7) <-(8) q(9) → p 的 opIndex=8
     expect(parseBindings(tokenize(text))).toEqual([
-      { varName: 'q', stIndex: 2, offset: 0 },
-      { varName: 'p', stIndex: 9, offset: 18 },
+      { varName: 'q', opIndex: 1, varOffset: 0 },
+      { varName: 'p', opIndex: 8, varOffset: 18 },
     ]);
   });
 
@@ -45,32 +45,32 @@ describe('parseBindings 扫描赋值（只记录，不分类）', () => {
     const text = 'f <- function() self$x <- 1';
     // 只有 f <- function 一条记录；self$x <- 1 的 x 前面是 $，跳过
     expect(parseBindings(tokenize(text))).toEqual([
-      { varName: 'f', stIndex: 2, offset: 0 },
+      { varName: 'f', opIndex: 1, varOffset: 0 },
     ]);
   });
 
   it('多个绑定按代码顺序返回', () => {
     const text = 'Person <- R6Class("Person")\np <- Person$new()\np$name';
-    // Person <- ...：Person(0) <-(1) R6Class(2) → stIndex=2
-    // p <- ...：p(6) <-(7) Person(8) → stIndex=8
+    // Person <- ...：Person(0) <-(1) R6Class(2) → opIndex=1
+    // p <- ...：p(6) <-(7) Person(8) → opIndex=7
     expect(parseBindings(tokenize(text))).toEqual([
-      { varName: 'Person', stIndex: 2, offset: 0 },
-      { varName: 'p', stIndex: 8, offset: 28 },
+      { varName: 'Person', opIndex: 1, varOffset: 0 },
+      { varName: 'p', opIndex: 7, varOffset: 28 },
     ]);
   });
 });
 
 describe('findLatestBinding 找光标前最近一次赋值', () => {
-  it('命中：查 q 返回 q 那条赋值（带 stIndex / offset）', () => {
+  it('命中：查 q 返回 q 那条赋值（带 opIndex / varOffset）', () => {
     const text =
-      'q <- Person$new()\n' + // q 的赋值：q(0) <-(1) Person(2) → stIndex=2、offset=0
+      'q <- Person$new()\n' + // q 的赋值：q(0) <-(1) Person(2) → opIndex=1、varOffset=0
       'p <- q';
     const bindings = parseBindings(tokenize(text));
     // 光标在文件末尾：两条赋值都在光标之前，查 q 应命中 q 那条
     expect(findLatestBinding(bindings, 'q', text.length)).toEqual({
       varName: 'q',
-      stIndex: 2,
-      offset: 0,
+      opIndex: 1,
+      varOffset: 0,
     });
   });
 
@@ -80,7 +80,7 @@ describe('findLatestBinding 找光标前最近一次赋值', () => {
       'x <- 2'; // 第 1 行：第二次赋值（光标前最近的一次是它）
     const bindings = parseBindings(tokenize(text));
     const hit = findLatestBinding(bindings, 'x', text.length);
-    expect(hit?.offset).toBe(text.indexOf('x', 1)); // 第二次 x 的位置，而不是第 0 行那个
+    expect(hit?.varOffset).toBe(text.indexOf('x', 1)); // 第二次 x 的位置，而不是第 0 行那个
   });
 
   it('光标之前没有该变量的赋值 → undefined（之后的赋值不算）', () => {
@@ -97,8 +97,8 @@ describe('findLatestBinding 找光标前最近一次赋值', () => {
     // 光标落在变量名 q 的偏移 0 上：边界含等号，应命中
     expect(findLatestBinding(bindings, 'q', 0)).toEqual({
       varName: 'q',
-      stIndex: 2,
-      offset: 0,
+      opIndex: 1,
+      varOffset: 0,
     });
   });
 });

@@ -57,6 +57,21 @@ describe('parseSourceFile 一个文件只解析一次', () => {
     expect(parsed.classes).toEqual([]);
     expect(parsed.lines.lineCount).toBe(1);
   });
+
+  it('类定义带上它所在文件的 uri（单文件）', () => {
+    const parsed = parseSourceFile({ uri: 'test.R', text: TEXT });
+    expect(parsed.classes.map((c) => c.uri)).toEqual(['test.R']);
+  });
+
+  it('跨文件时每个类的 uri 各归各的（不是都记成同一个文件）', () => {
+    const aText = 'A <- R6Class("A")';
+    const bText = 'B <- R6Class("B")';
+    const a = parseSourceFile({ uri: 'a.R', text: aText });
+    const b = parseSourceFile({ uri: 'b.R', text: bText });
+
+    expect(a.classes.map((c) => ({ name: c.name, uri: c.uri }))).toEqual([{ name: 'A', uri: 'a.R' }]);
+    expect(b.classes.map((c) => ({ name: c.name, uri: c.uri }))).toEqual([{ name: 'B', uri: 'b.R' }]);
+  });
 });
 
 describe('dedupeFiles 按 uri 去重（须在解析之前调用）', () => {

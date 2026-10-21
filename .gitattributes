@@ -10,6 +10,9 @@
 *.json text eol=crlf
 *.md   text eol=crlf
 
+# 实测脚本（evidence/demoN.R）：与其它源码一致用 CRLF；R 不像 bash 那样对行尾敏感
+*.R    text eol=crlf
+
 # shell 脚本必须留 LF：CRLF 会让 bash 解析出错（husky 的钩子就是这类）
 .husky/* text eol=lf
 *.sh     text eol=lf

@@ -59,7 +59,7 @@ export function parseSourceFile(file: SourceFile, tokens?: Token[]): ParsedSourc
     file,
     tokens: usedTokens,
     lines: new TextLines(file.text),
-    classes: parseR6(usedTokens),
+    classes: parseR6(file.uri, usedTokens),
     symbols: parseTopLevelSymbols(usedTokens),
     bindings: parseBindings(usedTokens),
     blocks: buildBlockTree(usedTokens),

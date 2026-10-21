@@ -62,7 +62,8 @@ function buildClassNode(classDef: R6ClassDef, tokens: Token[]): OutlineNode {
 
 /** 一个区 → 区节点；该区没有成员时返回 undefined（不生成空节点） */
 function buildScopeNode(classDef: R6ClassDef, scope: R6Scope, tokens: Token[]): OutlineNode | undefined {
-  const members = classDef.members.filter((m) => m.scope === scope);
+  // 成员按两侧存放（public 侧含 active）；大纲要按三区分别展示，所以先合并再按 scope 筛
+  const members = [...classDef.publicMembers, ...classDef.privateMembers].filter((m) => m.scope === scope);
   if (members.length === 0) return undefined;
 
   const enMember = members[members.length - 1];

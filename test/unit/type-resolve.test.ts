@@ -11,25 +11,25 @@ describe('resolveVarType 变量类型解析', () => {
   it('直接实例创建：p <- Person$new() → instance Person', () => {
     const text = 'Person <- R6Class("Person")\np <- Person$new()';
     const ctx = singleCtx(text);
-    expect(resolveVarType(ctx, 'p', text.length)).toEqual({ kind: 'instance', className: 'Person' });
+    expect(resolveVarType(ctx, 'p', text.length)).toEqual({ kind: 'r6-instance', className: 'Person' });
   });
 
   it('类定义本身：Person <- R6Class(...) → generator Person（className = 变量名）', () => {
     const text = 'Person <- R6Class("Person")';
     const ctx = singleCtx(text);
-    expect(resolveVarType(ctx, 'Person', text.length)).toEqual({ kind: 'generator', className: 'Person' });
+    expect(resolveVarType(ctx, 'Person', text.length)).toEqual({ kind: 'r6-generator', className: 'Person' });
   });
 
   it('命名空间类定义：Person <- R6::R6Class(...) → generator Person', () => {
     const text = 'Person <- R6::R6Class("Person")';
     const ctx = singleCtx(text);
-    expect(resolveVarType(ctx, 'Person', text.length)).toEqual({ kind: 'generator', className: 'Person' });
+    expect(resolveVarType(ctx, 'Person', text.length)).toEqual({ kind: 'r6-generator', className: 'Person' });
   });
 
   it('别名链递归：q <- Person$new(); p <- q → 追到 instance Person', () => {
     const text = 'Person <- R6Class("Person")\nq <- Person$new()\np <- q';
     const ctx = singleCtx(text);
-    expect(resolveVarType(ctx, 'p', text.length)).toEqual({ kind: 'instance', className: 'Person' });
+    expect(resolveVarType(ctx, 'p', text.length)).toEqual({ kind: 'r6-instance', className: 'Person' });
   });
 
   it('别名后换行还有代码：p <- q 下一行继续用 p → 仍追到 instance Person', () => {
@@ -37,20 +37,20 @@ describe('resolveVarType 变量类型解析', () => {
     const text = 'Person <- R6Class("Person")\nq <- Person$new()\np <- q\np$name';
     const ctx = singleCtx(text);
     const cursor = text.indexOf('p$name');
-    expect(resolveVarType(ctx, 'p', cursor + 2)).toEqual({ kind: 'instance', className: 'Person' });
+    expect(resolveVarType(ctx, 'p', cursor + 2)).toEqual({ kind: 'r6-instance', className: 'Person' });
   });
 
   it('模块取类：p <- person$Person（$ 链终点是类）→ 求值器识别为 generator Person', () => {
     // bindings 只记录位置；type-resolve 用求值器判断 $ 链终点 → Person
     const text = 'Person <- R6Class("Person")\np <- person$Person';
     const ctx = singleCtx(text);
-    expect(resolveVarType(ctx, 'p', text.length)).toEqual({ kind: 'generator', className: 'Person' });
+    expect(resolveVarType(ctx, 'p', text.length)).toEqual({ kind: 'r6-generator', className: 'Person' });
   });
 
   it('直接赋类名：p <- Person（单名字是类）→ 求值器识别为 generator Person', () => {
     const text = 'Person <- R6Class("Person")\np <- Person';
     const ctx = singleCtx(text);
-    expect(resolveVarType(ctx, 'p', text.length)).toEqual({ kind: 'generator', className: 'Person' });
+    expect(resolveVarType(ctx, 'p', text.length)).toEqual({ kind: 'r6-generator', className: 'Person' });
   });
 
   it('最近赋值：p 先 Person 后 Employee，不同位置返回不同类的实例', () => {
@@ -65,23 +65,23 @@ describe('resolveVarType 变量类型解析', () => {
 
     // 第 3 行的 p：取第 2 行的赋值 → Person
     const offset1 = text.indexOf('p$name');
-    expect(resolveVarType(ctx, 'p', offset1 + 2)).toEqual({ kind: 'instance', className: 'Person' });
+    expect(resolveVarType(ctx, 'p', offset1 + 2)).toEqual({ kind: 'r6-instance', className: 'Person' });
 
     // 第 5 行的 p：取第 4 行的赋值 → Employee
     const offset2 = text.indexOf('p$name', offset1 + 1);
     expect(resolveVarType(ctx, 'p', offset2 + 2)).toEqual({
-      kind: 'instance',
+      kind: 'r6-instance',
       className: 'Employee',
     });
   });
 
-  it('防环：a <- b; b <- a → null', () => {
+  it('防环：a <- b; b <- a → unknown', () => {
     const text = 'a <- b\nb <- a';
     const ctx = singleCtx(text);
-    expect(resolveVarType(ctx, 'a', text.length)).toBeNull();
+    expect(resolveVarType(ctx, 'a', text.length)).toEqual({ kind: 'unknown' });
   });
 
-  it('超长别名链超过深度上限 → null（防栈溢出）', () => {
+  it('超长别名链超过深度上限 → unknown（防栈溢出）', () => {
     // 构造超过 MAX_TRACE_DEPTH 的别名链：v0 <- v1 <- ... <- v150 <- 1
     const lines: string[] = [];
     for (let i = 0; i < 150; i++) {
@@ -90,8 +90,8 @@ describe('resolveVarType 变量类型解析', () => {
     lines.push('v150 <- 1'); // 终点是普通值
     const text = lines.join('\n');
     const ctx = singleCtx(text);
-    // 链超长按深度上限返回 null（不崩溃、不死循环）
-    expect(resolveVarType(ctx, 'v0', text.length)).toBeNull();
+    // 链超长按深度上限返回 unknown（不崩溃、不死循环）
+    expect(resolveVarType(ctx, 'v0', text.length)).toEqual({ kind: 'unknown' });
   });
 
   it('函数：func <- function() {} → function', () => {
@@ -100,16 +100,16 @@ describe('resolveVarType 变量类型解析', () => {
     expect(resolveVarType(ctx, 'func', text.length)).toEqual({ kind: 'function' });
   });
 
-  it('unknown：x <- 1 + 1 → null', () => {
+  it('unknown：x <- 1 + 1 → unknown', () => {
     const text = 'x <- 1 + 1';
     const ctx = singleCtx(text);
-    expect(resolveVarType(ctx, 'x', text.length)).toBeNull();
+    expect(resolveVarType(ctx, 'x', text.length)).toEqual({ kind: 'unknown' });
   });
 
-  it('该位置前没有赋值 → null', () => {
+  it('该位置前没有赋值 → unknown', () => {
     const text = 'p$name\np <- Person$new()';
     const ctx = singleCtx(text);
     // 光标在第 0 行 p$name 上，此时 p 还没赋值
-    expect(resolveVarType(ctx, 'p', 0)).toBeNull();
+    expect(resolveVarType(ctx, 'p', 0)).toEqual({ kind: 'unknown' });
   });
 });

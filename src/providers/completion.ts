@@ -31,12 +31,7 @@ export class R6CompletionProvider implements vscode.CompletionItemProvider {
     // 20261012 zyh: 已确定，当前阶段还未实现::这种补全的逻辑
     if (trigger.kind === 'namespace') return undefined;
 
-    const candidates = r6MemberCandidates(
-      ctx,
-      trigger.container,
-      trigger.containerIndex,
-      cursorOffset,
-    );
+    const candidates = r6MemberCandidates(ctx, trigger.containerIndex, cursorOffset);
     // null = 容器不是 R6 类（普通变量、模块名、包名…）→ 交给别的来源，不抢
     if (candidates === null) return undefined;
 

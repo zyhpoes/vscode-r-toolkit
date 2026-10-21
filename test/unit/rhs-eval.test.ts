@@ -24,7 +24,7 @@ function evalVar(text: string, varName: string): ReturnType<typeof evaluateRhs> 
   if (rhsStart === -1) throw new Error(`测试文本里找不到变量 ${varName} 的赋值`);
 
   // 类清单：从同一文本里的 R6Class 定义来（测试里简单场景类名即变量名）
-  const classes = parseR6(tokenize(text));
+  const classes = parseR6('test.R', tokenize(text));
   const resolver = createNameResolver(classes);
   return evaluateRhs(tokens, rhsStart, { names: resolver, cursorOffset: 0 });
 }
@@ -33,28 +33,28 @@ describe('evaluateRhs 赋值右边求值', () => {
   it('Person$new() → instance Person', () => {
     // 类定义在同一文本里，让 parseR6 能认出 Person
     const text = 'Person <- R6Class("Person")\np <- Person$new()';
-    expect(evalVar(text, 'p')).toEqual({ kind: 'instance', className: 'Person' });
+    expect(evalVar(text, 'p')).toEqual({ kind: 'r6-instance', className: 'Person' });
   });
 
   it('模块前缀 + new：person$Person$new() → instance Person', () => {
     const text = 'Person <- R6Class("Person")\np <- person$Person$new()';
-    expect(evalVar(text, 'p')).toEqual({ kind: 'instance', className: 'Person' });
+    expect(evalVar(text, 'p')).toEqual({ kind: 'r6-instance', className: 'Person' });
   });
 
   it('Person（类名本身）→ generator Person', () => {
     const text = 'Person <- R6Class("Person")\np <- Person';
-    expect(evalVar(text, 'p')).toEqual({ kind: 'generator', className: 'Person' });
+    expect(evalVar(text, 'p')).toEqual({ kind: 'r6-generator', className: 'Person' });
   });
 
   it('模块取类 person$Person → generator Person', () => {
     // person$Person 里的 Person 是类（类清单里有），person 是模块（忽略）
     const text = 'Person <- R6Class("Person")\np <- person$Person';
-    expect(evalVar(text, 'p')).toEqual({ kind: 'generator', className: 'Person' });
+    expect(evalVar(text, 'p')).toEqual({ kind: 'r6-generator', className: 'Person' });
   });
 
   it('多级链 proj$models$Person → generator Person（链尾是类）', () => {
     const text = 'Person <- R6Class("Person")\np <- proj$models$Person';
-    expect(evalVar(text, 'p')).toEqual({ kind: 'generator', className: 'Person' });
+    expect(evalVar(text, 'p')).toEqual({ kind: 'r6-generator', className: 'Person' });
   });
 
   it('function 定义 → function', () => {

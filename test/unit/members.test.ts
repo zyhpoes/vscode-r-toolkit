@@ -158,7 +158,7 @@ describe('resolveMemberDefinition 跨文件成员跳转', () => {
   });
 });
 
-describe('resolveMemberDefinition 继承：父类成员 / super$ / private 不随继承', () => {
+describe('resolveMemberDefinition 继承：父类成员 / super$ / private 随继承', () => {
   it('self$ 引用父类成员 → 跳到父类定义（同文件继承）', () => {
     const text =
       'Base <- R6Class("Base",\n' + // 第 0 行：Base
@@ -217,14 +217,18 @@ describe('resolveMemberDefinition 继承：父类成员 / super$ / private 不�
     });
   });
 
-  it('private 不随继承：子类里 private$age（age 只在父类 private）→ null', () => {
+  it('private 随继承：子类里 private$age（age 只在父类 private）→ 跳到父类的 age', () => {
     const text =
       'Base <- R6Class("Base", private = list(age = NA))\n' + // 第 0 行
       'Child <- R6Class("Child", inherit = Base,\n' + // 第 1 行
       '  public = list(get = function() private$age))\n'; // 第 2 行：private$age
     const ctx = singleCtx(text);
     const cursor = text.indexOf('private$age') + 'private$'.length + 1;
-    expect(resolveMemberDefinition(ctx, cursor)).toBeNull();
+    expect(resolveMemberDefinition(ctx, cursor)).toEqual({
+      name: 'age',
+      uri: 'test.R',
+      ...defPos(text, 'age = NA'), // 父类 Base 的 private age
+    });
   });
 
   it('super$ 覆盖场景：子类方法里 super$greet → 跳父类 greet（不是子类自己的）', () => {
@@ -264,6 +268,46 @@ describe('resolveMemberDefinition 继承：父类成员 / super$ / private 不�
       'super$greet'; // 第 2 行：顶层 super$greet，不在类里
     const ctx = singleCtx(text);
     const cursor = text.indexOf('super$greet') + 'super$'.length + 1;
+    expect(resolveMemberDefinition(ctx, cursor)).toBeNull();
+  });
+
+  it('链式跳转：h$cls$run → 跳到 FieldInfo 的 run（补全早就支持，跳转这次跟上）', () => {
+    const text =
+      'FieldInfo <- R6Class("FieldInfo", public = list(run = function() 1))\n' + // 第 0 行
+      'Holder <- R6Class("Holder", public = list(cls = FieldInfo))\n' + // 第 1 行
+      'h <- Holder$new()\n' + // 第 2 行
+      'h$cls$run'; // 第 3 行：光标在 run 上
+    const ctx = singleCtx(text);
+    const cursor = text.indexOf('h$cls$run') + 'h$cls$'.length + 1;
+    expect(resolveMemberDefinition(ctx, cursor)).toEqual({
+      name: 'run',
+      uri: 'test.R',
+      ...defPos(text, 'run = function'),
+    });
+  });
+
+  it('链式跳转（关键字链头）：self$cls$run → 同样折叠到 FieldInfo', () => {
+    const text =
+      'FieldInfo <- R6Class("FieldInfo", public = list(run = function() 1))\n' + // 第 0 行
+      'Holder <- R6Class("Holder", public = list(\n' + // 第 1 行
+      '  cls = FieldInfo,\n' + // 第 2 行
+      '  go = function() self$cls$run\n' + // 第 3 行：光标在 run 上
+      '))';
+    const ctx = singleCtx(text);
+    const cursor = text.indexOf('self$cls$run') + 'self$cls$'.length + 1;
+    expect(resolveMemberDefinition(ctx, cursor)).toEqual({
+      name: 'run',
+      uri: 'test.R',
+      ...defPos(text, 'run = function'),
+    });
+  });
+
+  it('链式折叠失败时退回单段：model$field$run（model 未知）→ null，不误命中', () => {
+    const text =
+      'FieldInfo <- R6Class("FieldInfo", public = list(run = function() 1))\n' + // 第 0 行
+      'model$field$run'; // 第 1 行：model 是未知变量
+    const ctx = singleCtx(text);
+    const cursor = text.indexOf('model$field$run') + 'model$field$'.length + 1;
     expect(resolveMemberDefinition(ctx, cursor)).toBeNull();
   });
 
