@@ -82,6 +82,19 @@ describe('tokenize 基本切分', () => {
     expect(texts(tokenize('a <- b'))).toEqual(['a', '<-', 'b']);
   });
 
+  it('[[ 和 ]] 各是一个 token（双层取子集）', () => {
+    expect(texts(tokenize('x[[1]]'))).toEqual(['x', '[[', '1', ']]']);
+    // 单层不受影响
+    expect(texts(tokenize('x[1]'))).toEqual(['x', '[', '1', ']']);
+  });
+
+  it('|> 是一个 token（R 4.1+ 原生管道）', () => {
+    expect(texts(tokenize('x |> f()'))).toEqual(['x', '|>', 'f', '(', ')']);
+    // 不要和单个 | 或 || 混
+    expect(texts(tokenize('a | b'))).toEqual(['a', '|', 'b']);
+    expect(texts(tokenize('a || b'))).toEqual(['a', '||', 'b']);
+  });
+
   it('命名空间运算符 :: 和 :::', () => {
     expect(texts(tokenize('R6::R6Class'))).toEqual(['R6', '::', 'R6Class']);
     expect(texts(tokenize('R6:::R6Class'))).toEqual(['R6', ':::', 'R6Class']);

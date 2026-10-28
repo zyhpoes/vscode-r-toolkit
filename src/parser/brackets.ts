@@ -5,10 +5,11 @@
 
 import type { Token } from './tokenizer';
 
-/** 开括号 → 闭合括号 的映射（R 语言只有这三种成对括号） */
+/** 开括号 → 闭合括号 的映射（R 语言只有这三种成对括号；`[[ ]]` 是 `[ ]` 的双层写法） */
 const CLOSE_BY_OPEN: Record<string, string> = {
   '(': ')',
   '[': ']',
+  '[[': ']]',
   '{': '}',
 };
 

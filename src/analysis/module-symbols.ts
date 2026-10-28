@@ -150,8 +150,8 @@ export function resolveModuleMemberDefinition(
 
 /** 括号对深度的贡献：开括号 +1、闭括号 -1、其它运算符 0 */
 function bracketDepthDelta(text: string): number {
-  if (text === '(' || text === '{' || text === '[') return 1;
-  if (text === ')' || text === '}' || text === ']') return -1;
+  if (text === '(' || text === '{' || text === '[' || text === '[[') return 1;
+  if (text === ')' || text === '}' || text === ']' || text === ']]') return -1;
   return 0;
 }
 

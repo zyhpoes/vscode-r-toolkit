@@ -46,8 +46,10 @@ export function completionTriggerAt(
   const tokens = ctx.cursorFile.tokens;
 
   // 结束于光标处（或含光标）的 token：`self$gr|` → `gr`；`self$|` → `$`
+  // 用半开区间 `stOffset < 光标 <= enOffset`：右侧紧贴另一个 token 时（如 `f(m$)` 里
+  // `$` 与 `)` 相接），光标同时落在两者的边界上，不能让后面那个把 `$` 顶掉。
   const endIndex = tokens.findLastIndex(
-    (t) => t.stOffset <= cursorOffset && cursorOffset <= t.enOffset,
+    (t) => t.stOffset < cursorOffset && cursorOffset <= t.enOffset,
   );
   if (endIndex === -1) return null;
 

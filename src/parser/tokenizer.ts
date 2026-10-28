@@ -170,6 +170,9 @@ function operatorLength(text: string, i: number): number {
     rest.startsWith('!=') ||
     rest.startsWith('&&') ||
     rest.startsWith('||') ||
+    rest.startsWith('|>') || // 原生管道（R 4.1+）
+    rest.startsWith('[[') || // 双层取子集：x[[1]]
+    rest.startsWith(']]') || // 它自己的收尾
     rest.startsWith('::') // 命名空间访问（R6::R6Class）
   ) {
     return 2;

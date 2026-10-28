@@ -77,6 +77,21 @@ describe('completionTriggerAt 补全触发上下文', () => {
     });
   });
 
+  it('`$` 右边紧贴其它 token（`f(p$)` / `p$name,`）→ 仍然触发', () => {
+    // 光标正好落在 `$` 与 `)` 的公共边界上：取 token 的区间是半开的，不让 `)` 把 `$` 顶掉
+    const text = 'f(p$)';
+    expect(completionTriggerAt(singleCtx(text), text.indexOf('p$') + 2)).toMatchObject({
+      kind: 'member',
+      containerName: 'p',
+    });
+
+    const text2 = 'paste0(p$name, "x")';
+    expect(completionTriggerAt(singleCtx(text2), text2.indexOf('$name') + 5)).toMatchObject({
+      kind: 'member',
+      containerName: 'p',
+    });
+  });
+
   it('box::use(...) 括号内部 → 不触发（v1 不补导入语句内部）', () => {
     const text = 'box::use(R/schema/schema)';
     expect(completionTriggerAt(singleCtx(text), text.indexOf('schema'))).toBeNull();

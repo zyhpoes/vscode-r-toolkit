@@ -31,9 +31,9 @@ export function splitTopLevel(
     const t = tokens[j];
     // 只有运算符参与切分判断（括号进/出深度、逗号分隔），其他 token 跳过
     if (t.kind === 'operator') {
-      if (t.text === '(' || t.text === '{' || t.text === '[') {
+      if (t.text === '(' || t.text === '{' || t.text === '[' || t.text === '[[') {
         depth++; // 进嵌套：里面的逗号不算顶层
-      } else if (t.text === ')' || t.text === '}' || t.text === ']') {
+      } else if (t.text === ')' || t.text === '}' || t.text === ']' || t.text === ']]') {
         depth--; // 出嵌套
       } else if (t.text === ',' && depth === 0) {
         // 顶层逗号：当前块结束（[stItemIndex, j)），新块从逗号后开始
